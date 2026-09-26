@@ -34,7 +34,7 @@ from flask import Flask
 from core import database
 from core.config import BOT_TOKEN, DEFAULT_PREFIX
 
-EXTENSIONS = ("cogs.growth", "cogs.music", "cogs.admin")
+EXTENSIONS = ("cogs.growth", "cogs.music", "cogs.hierarchy", "cogs.admin")
 
 # --- Web server to keep the process alive on free-tier hosts ---
 app = Flask('')
