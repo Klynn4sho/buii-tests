@@ -39,3 +39,22 @@ GRAPH_FILL = "#5865F2"
 
 # --- Behavior constants ---
 RATING_WINDOW_HOURS = 12  # how long a song stays open for voting before auto-closing
+
+# --- Staff hierarchy feature ---
+# Permission names (must match attributes on discord.Permissions) that mark
+# a role as "staff" for the /hierarchy directory image.
+MODERATION_PERMISSIONS = [
+    "administrator",
+    "manage_guild",
+    "manage_roles",
+    "manage_channels",
+    "kick_members",
+    "ban_members",
+    "moderate_members",
+    "manage_messages",
+]
+
+# Role names or IDs (as strings) excluded from the hierarchy image even if
+# they carry a moderation permission (e.g. a mute role that has
+# manage_messages revoked per-channel, or an internal bot-handling role).
+HIERARCHY_IGNORED_ROLE_NAMES = ["Muted", "Bot Handler"]
