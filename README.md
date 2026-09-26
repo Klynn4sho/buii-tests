@@ -29,6 +29,11 @@ core/
                            fetching, the Spotify/Deezer/iTunes search
                            cascade, genre lookup, and Spotify playlist
                            sync/remove. Pure networking, no Discord/DB code.
+  hierarchy_utils.py           Staff-role detection (is_staff_role) and the
+                           Pillow rendering of the /hierarchy directory
+                           image. Kept separate from helpers.py the same
+                           way music_utils.py is — a self-contained feature
+                           unrelated to growth or music.
 
 cogs/
   growth.py    GrowthCog    Invite tracking: on_member_join/remove,
@@ -43,6 +48,10 @@ cogs/
                            musicleaderboard, removesong, closevoting,
                            songratings, synctoplaylist, myratings,
                            setmusicchannel/role/lock, renumbersongs).
+  hierarchy.py HierarchyCog Staff directory: /hierarchy (aliases /staffs,
+                           /stafflist) renders a PNG of every moderation-
+                           permission role, ranked by position, with member
+                           avatars and vacancy status per role.
   admin.py     AdminCog     /help (auto-grouped by cog) and /sync.
 
 views/
