@@ -2,11 +2,16 @@
 Staff hierarchy directory: renders a PNG showing every staff-permission
 role in the server, ranked by position, with member avatars and vacancy
 status per role.
+
+No interactive components are attached, so per the project's Components V2
+rule (core/components.py) this stays borderless: a plain caption above the
+image, no Container.
 """
 
 import discord
 from discord.ext import commands
 
+from core.components import SimpleImageLayout, footer_line
 from core.hierarchy_utils import is_staff_role, build_hierarchy_image
 
 
@@ -48,7 +53,15 @@ class HierarchyCog(commands.Cog, name="HierarchyCog"):
         buffer, total_staff, vacant_count = await build_hierarchy_image(staff_roles, self.bot.http_session)
 
         file = discord.File(fp=buffer, filename="hierarchy.png")
-        await ctx.send(file=file)
+        # total_staff/vacant_count were computed but never actually shown
+        # to the user before — surfacing them here as a caption is a real
+        # improvement, not just a cosmetic port.
+        header = (
+            "# 🪪 SERVER HIERARCHY\n"
+            f"-# {len(staff_roles)} tiers • {total_staff} staff • {vacant_count} vacant\n\n"
+            + footer_line("Staff Directory")
+        )
+        await ctx.send(view=SimpleImageLayout(header, file), file=file)
 
 
 async def setup(bot: commands.Bot):
