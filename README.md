@@ -1,7 +1,40 @@
 # Buii — cogs edition
 
-The original single-file bot, split into a `cogs/`-based project. Behavior
-is unchanged; only the organization is different.
+The original single-file bot, split into a `cogs/`-based project, then
+migrated from embeds to Discord's Components V2 UI system.
+
+## UI: Components V2, not embeds
+
+Every response in this bot is a `discord.ui.LayoutView` — nothing sends
+`discord.Embed` anywhere. This requires **discord.py >= 2.6.0** (Components
+V2 support; current stable is 2.7.x), pinned in `requirements.txt`.
+
+The design rule, defined and explained in `core/components.py`:
+`ui.Container` (the accent-colored, bordered "boxed" look — visually the
+same thing an embed's colored left stripe did) is used **only** where a
+message actually bundles interactive buttons/selects with their
+explanatory content — the dashboard panel, the graph range picker, the
+rating card's 1-10 buttons, the renumber confirm/cancel prompt. Everything
+purely informational — confirmations, leaderboards, stat summaries,
+inspection results, the join-risk alert — is borderless `TextDisplay` /
+`Section` / `MediaGallery` directly on the `LayoutView`, with no
+`Container` at all. Risk/status color that a border used to carry (danger
+red, success green, risk-tier) survives through emoji (🚨/⚠️/🟢, 🟥/🟨/🟩)
+instead, so nothing is silently lost by going borderless.
+
+`core/components.py` also holds three reusable layout classes so most
+commands don't need a custom `LayoutView` subclass:
+- `SimpleLayout(text)` — one borderless text block.
+- `SimpleImageLayout(text, file)` — one text block + one image, borderless
+  (used by `/graph`'s underlying image and `/hierarchy`).
+- `Layout(*items)` — borderless, for anything needing more than one
+  `TextDisplay`/`Section`/`Separator` (join alerts, `/invites`, `/help`).
+
+A message sent with Components V2 can **never** combine `content=`/
+`embeds=` with a `view=`. Anywhere the old code relied on a `content=`
+mention to ping a user/role (song posts, duplicate-detection notices), the
+mention now lives as plain text inside a `TextDisplay` — Discord still
+delivers the ping from there, just not from the `content` field.
 
 ## Layout
 
@@ -21,10 +54,19 @@ core/
                            config) and the music tables (songs/ratings).
                            Both feature domains share one pool, so this
                            stays one module rather than being split further.
-  helpers.py                 Formatting/UI helpers: progress bars, embed
-                           footers, format_elapsed(), the dashboard embed
-                           builder, the matplotlib join-growth graph, and
-                           the full Pillow dynamic music-card renderer.
+  helpers.py                 Formatting/UI helpers: progress bars,
+                           format_elapsed(), build_dashboard_content_items()
+                           (the dashboard's CV2 content, consumed by
+                           DashboardView), the matplotlib join-growth graph,
+                           and the full Pillow dynamic music-card renderer
+                           (including score_color(), used by the rating
+                           views to pick the Container's accent color).
+  components.py               Shared Components V2 building blocks:
+                           SimpleLayout, SimpleImageLayout, Layout, and
+                           footer_line() (the "-# small text" caption that
+                           replaces embed footers). See the CV2 section
+                           above for the border/no-border design rule this
+                           file documents and every cog/view follows.
   music_utils.py              Music-link regexes, oEmbed/OG metadata
                            fetching, the Spotify/Deezer/iTunes search
                            cascade, genre lookup, and Spotify playlist
