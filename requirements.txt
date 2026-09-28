@@ -1,4 +1,4 @@
-discord.py>=2.3.0
+discord.py>=2.6.0
 psycopg2-binary>=2.9
 flask>=3.0
 matplotlib>=3.8
