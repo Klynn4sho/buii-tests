@@ -49,7 +49,7 @@ class SimpleImageLayout(ui.LayoutView):
     def __init__(self, content: str, file: discord.File):
         super().__init__(timeout=None)
         self.add_item(ui.TextDisplay(content))
-        self.add_item(ui.MediaGallery(ui.MediaGalleryItem(file)))
+        self.add_item(ui.MediaGallery(discord.MediaGalleryItem(file)))
         self.file = file
 
 
