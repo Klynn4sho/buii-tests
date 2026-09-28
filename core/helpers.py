@@ -1,7 +1,7 @@
 """
-Formatting and rendering helpers shared across cogs: progress bars, embed
-footers, the Pillow-based dynamic music card generator, the live dashboard
-embed builder, and the matplotlib join-growth graph.
+Formatting and rendering helpers shared across cogs: progress bars, the
+Components V2 dashboard content builder, the Pillow-based dynamic music
+card generator, and the matplotlib join-growth graph.
 """
 
 import asyncio
@@ -12,6 +12,7 @@ import math
 from datetime import datetime, timezone
 
 import discord
+from discord import ui
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -20,17 +21,8 @@ import matplotlib.font_manager as fm
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 
 from core import database
-from core.config import GRAPH_BG, GRAPH_GRID, GRAPH_TEXT, GRAPH_ACCENT, GRAPH_FILL, COLOR_BRAND
-
-
-# ==========================================================================
-# Text / embed helpers
-# ==========================================================================
-
-def themed_footer(embed: discord.Embed, bot: discord.Client, text: str = "Buii Analytics Core") -> discord.Embed:
-    icon_url = bot.user.display_avatar.url if bot.user else None
-    embed.set_footer(text=f"⚙️ {text} • System Operational", icon_url=icon_url)
-    return embed
+from core.config import GRAPH_BG, GRAPH_GRID, GRAPH_TEXT, GRAPH_ACCENT, GRAPH_FILL
+from core.components import footer_line
 
 
 def make_bar(value, max_value, length=10, filled_char="🟩", empty_char="⬛"):
@@ -67,40 +59,18 @@ def format_elapsed(dt: datetime) -> str:
 
 
 # ==========================================================================
-# Dashboard embed
+# Dashboard content (Components V2)
 # ==========================================================================
 
-async def async_build_dashboard_embed(guild: discord.Guild, bot: discord.Client) -> discord.Embed:
+async def build_dashboard_content_items(guild: discord.Guild) -> list:
+    """Builds the dashboard's Components V2 content — a list of ui.Item
+    ready to be added into a Container by DashboardView. Kept separate
+    from DashboardView itself so the view only owns interactive state
+    (the buttons) while this owns what to actually display, mirroring how
+    the old async_build_dashboard_embed was a pure data-to-embed function."""
     total, day_count, risk_count, codes = await database.async_compile_dashboard_stats(guild.id)
 
-    embed = discord.Embed(
-        title="📊 LIVE GROWTH & ANALYTICS DASHBOARD",
-        description="`⚡ LIVE MONITOR` • *Auto-refreshes every 60 minutes*",
-        color=COLOR_BRAND,
-        timestamp=datetime.now(timezone.utc)
-    )
-    if guild.icon:
-        embed.set_thumbnail(url=guild.icon.url)
-
-    embed.add_field(
-        name="📈 Growth Overview",
-        value=(
-            f"┣ Total Joins Logged: **{total}**\n"
-            f"┗ Joins (Last 24 Hours): **{day_count}**"
-        ),
-        inline=True
-    )
-
     risk_bar = make_bar(risk_count, max(total, 1), length=8, filled_char="🟥", empty_char="⬛")
-    embed.add_field(
-        name="🛡️ Security Metrics",
-        value=(
-            f"┣ Flagged Alts (<7d): **{risk_count}**\n"
-            f"┣ Total Members: **{guild.member_count}**\n"
-            f"┗ `{risk_bar}`"
-        ),
-        inline=True
-    )
 
     code_lines = []
     if codes:
@@ -112,9 +82,30 @@ async def async_build_dashboard_embed(guild: discord.Guild, bot: discord.Client)
     else:
         code_text = "*No custom invite links tracked yet.*"
 
-    embed.add_field(name="🔗 Top Performing Invite Links", value=code_text, inline=False)
-    themed_footer(embed, bot, "Live Dashboard")
-    return embed
+    header = ui.TextDisplay(
+        "# 📊 LIVE GROWTH & ANALYTICS DASHBOARD\n"
+        "`⚡ LIVE MONITOR` • *Auto-refreshes every 60 minutes*"
+    )
+
+    if guild.icon:
+        header = ui.Section(header, accessory=ui.Thumbnail(guild.icon.url))
+
+    stats = ui.TextDisplay(
+        "**📈 Growth Overview**\n"
+        f"┣ Total Joins Logged: **{total}**\n"
+        f"┗ Joins (Last 24 Hours): **{day_count}**\n"
+        "\n"
+        "**🛡️ Security Metrics**\n"
+        f"┣ Flagged Alts (<7d): **{risk_count}**\n"
+        f"┣ Total Members: **{guild.member_count}**\n"
+        f"┗ `{risk_bar}`"
+    )
+
+    links = ui.TextDisplay(f"**🔗 Top Performing Invite Links**\n{code_text}")
+
+    footer = ui.TextDisplay(footer_line("Live Dashboard"))
+
+    return [header, ui.Separator(), stats, ui.Separator(), links, ui.Separator(spacing=discord.SeparatorSpacing.small), footer]
 
 
 # ==========================================================================
@@ -206,7 +197,7 @@ def _rounded_mask(size, radius):
     return mask
 
 
-def _score_color(avg: float) -> str:
+def score_color(avg: float) -> str:
     if avg >= 7.5:
         return "#57F287"
     if avg >= 5.0:
@@ -381,7 +372,7 @@ async def create_music_card(session, title: str, artist: str, cover_url: str,
     score_y = wave_y + wave_h + 14 * SCALE
 
     if count > 0:
-        color = _score_color(avg)
+        color = score_color(avg)
         _draw_star(draw, text_x + 14 * SCALE, score_y + 12 * SCALE, 14 * SCALE, color)
         draw.text((text_x + 34 * SCALE, score_y), f"{avg:.1f} / 10", fill=color, font=font_score)
         vote_label = f"{count} member rating" + ("s" if count != 1 else "")
