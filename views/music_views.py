@@ -50,9 +50,10 @@ def _track_text(title: str, artist: str, preview_url: str = None, url: str = Non
 
 class RatingButton(ui.Button):
     def __init__(self, score: int, song_id: int):
-        row = 0 if score <= 5 else 1
+        # No `row=` here: RatingView groups these into two explicit
+        # ActionRows (1-5, 6-10), which already decide the layout.
         super().__init__(label=str(score), style=discord.ButtonStyle.secondary,
-                          custom_id=f"rate|{song_id}|{score}", row=row)
+                          custom_id=f"rate|{song_id}|{score}")
         self.score = score
         self.song_id = song_id
 
@@ -121,7 +122,7 @@ class RatingView(ui.LayoutView):
 
         items = [ui.TextDisplay(_track_text(title, artist, preview_url, url, requester_name, ping_text))]
         if card_file is not None:
-            items.append(ui.MediaGallery(ui.MediaGalleryItem(card_file)))
+            items.append(ui.MediaGallery(discord.MediaGalleryItem(card_file)))
 
         items.append(ui.ActionRow(*(RatingButton(i, song_id) for i in range(1, 6))))
         items.append(ui.ActionRow(*(RatingButton(i, song_id) for i in range(6, 11))))
@@ -147,7 +148,7 @@ class ClosedRatingView(ui.LayoutView):
 
         items = [ui.TextDisplay(_track_text(song.get("title"), song.get("artist"),
                                              song.get("preview_url"), song.get("url")))]
-        items.append(ui.MediaGallery(ui.MediaGalleryItem("attachment://rating_card.png")))
+        items.append(ui.MediaGallery(discord.MediaGalleryItem("attachment://rating_card.png")))
 
         for row_range in (range(1, 6), range(6, 11)):
             items.append(ui.ActionRow(*(
