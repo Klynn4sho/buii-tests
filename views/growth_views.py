@@ -1,64 +1,55 @@
 """
-Persistent Views for the invite/growth dashboard: the refresh + CSV-export
-dashboard panel, and the time-range dropdown attached to /graph.
+Components V2 layouts for the invite/growth dashboard: the refresh +
+CSV-export dashboard panel, and the time-range picker attached to /graph.
+
+Both bundle interactive components (buttons/a select menu) with their
+explanatory content, so both use a bordered Container — per the project's
+rule, that's exactly the case a border earns its keep.
 """
 
 import csv
 import io
-from datetime import datetime, timezone
 
 import discord
+from discord import ui
 
 from core import database
-from core.config import BYPASS_USER_ID
-from core.helpers import async_build_dashboard_embed, build_joins_graph_async, themed_footer
-from core.config import COLOR_BRAND
+from core.config import BYPASS_USER_ID, COLOR_BRAND
+from core.components import footer_line
+from core.helpers import build_dashboard_content_items, build_joins_graph_async
 
 
-class GraphRangeSelect(discord.ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label="Last 7 Days", value="7", emoji="📅"),
-            discord.SelectOption(label="Last 30 Days", value="30", emoji="📊"),
-            discord.SelectOption(label="Last 90 Days", value="90", emoji="📈"),
-        ]
-        super().__init__(placeholder="Choose time range for growth chart...", options=options, custom_id="select_graph_range")
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        days = int(self.values[0])
-        graph_file = await build_joins_graph_async(interaction.guild.id, days=days)
-
-        embed = discord.Embed(
-            title=f"📈 GROWTH TRENDS — LAST {days} DAYS",
-            color=COLOR_BRAND,
-            timestamp=datetime.now(timezone.utc)
-        )
-        embed.set_image(url="attachment://joins_graph.png")
-        themed_footer(embed, interaction.client, "Interactive Visual Intelligence")
-        await interaction.followup.send(embed=embed, file=graph_file, ephemeral=True)
-
-
-class GraphView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(GraphRangeSelect())
-
-
-class DashboardView(discord.ui.View):
-    def __init__(self):
+class DashboardView(ui.LayoutView):
+    def __init__(self, content_items: list | None = None):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Refresh Stats", style=discord.ButtonStyle.primary, emoji="🔄", custom_id="btn_refresh_dashboard")
-    async def refresh_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        items = content_items or [ui.TextDisplay("Loading dashboard…")]
+        self.container = ui.Container(*items, accent_color=COLOR_BRAND)
+
+        refresh_btn = ui.Button(label="Refresh Stats", style=discord.ButtonStyle.primary,
+                                 emoji="🔄", custom_id="btn_refresh_dashboard")
+        refresh_btn.callback = self.on_refresh
+
+        export_btn = ui.Button(label="Export History", style=discord.ButtonStyle.secondary,
+                                emoji="📥", custom_id="btn_export_csv")
+        export_btn.callback = self.on_export
+
+        self.container.add_item(ui.ActionRow(refresh_btn, export_btn))
+        self.add_item(self.container)
+
+    @classmethod
+    async def build(cls, guild: discord.Guild) -> "DashboardView":
+        items = await build_dashboard_content_items(guild)
+        return cls(items)
+
+    async def on_refresh(self, interaction: discord.Interaction):
         if not interaction.guild:
             return
-        embed = await async_build_dashboard_embed(interaction.guild, interaction.client)
-        await interaction.response.edit_message(embed=embed, view=self)
+        new_view = await DashboardView.build(interaction.guild)
+        await interaction.response.edit_message(view=new_view)
         await interaction.followup.send("✅ Dashboard metrics refreshed successfully!", ephemeral=True)
 
-    @discord.ui.button(label="Export History", style=discord.ButtonStyle.secondary, emoji="📥", custom_id="btn_export_csv")
-    async def export_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def on_export(self, interaction: discord.Interaction):
         if not interaction.guild:
             return
         is_admin = interaction.user.guild_permissions.administrator
@@ -79,4 +70,55 @@ class DashboardView(discord.ui.View):
 
         filename = "tracker_export_all_time.csv"
         discord_file = discord.File(fp=io.BytesIO(output.getvalue().encode('utf-8')), filename=filename)
+        # A plain followup (no view=) is a normal message, so content + a
+        # file attachment together is fine here — the "no content/embeds"
+        # restriction only applies to messages carrying a LayoutView.
         await interaction.followup.send(content="📊 Here is your exported join history CSV:", file=discord_file, ephemeral=True)
+
+
+class GraphView(ui.LayoutView):
+    """Built fresh per invocation/range-change via GraphView.build() — the
+    image already carries the visual weight, so this only wraps it in a
+    Container because the select menu (an interactive component) needs to
+    live alongside it; a bare image+text with no border would be the
+    borderless choice if the picker weren't attached."""
+    def __init__(self, days: int, graph_file: discord.File):
+        super().__init__(timeout=None)
+        self.days = days
+        self.file = graph_file
+
+        self.range_select = ui.Select(
+            placeholder="Choose time range for growth chart...",
+            custom_id="select_graph_range",
+            options=[
+                discord.SelectOption(label="Last 7 Days", value="7", emoji="📅", default=days == 7),
+                discord.SelectOption(label="Last 30 Days", value="30", emoji="📊", default=days == 30),
+                discord.SelectOption(label="Last 90 Days", value="90", emoji="📈", default=days == 90),
+            ],
+        )
+        self.range_select.callback = self.on_range_change
+
+        self.container = ui.Container(
+            ui.TextDisplay(f"# 📈 GROWTH TRENDS — LAST {days} DAYS"),
+            ui.MediaGallery(ui.MediaGalleryItem(graph_file)),
+            ui.ActionRow(self.range_select),
+            ui.TextDisplay(footer_line("Visual Intelligence")),
+            accent_color=COLOR_BRAND,
+        )
+        self.add_item(self.container)
+
+    @classmethod
+    async def build(cls, guild_id: int, days: int = 30) -> "GraphView":
+        graph_file = await build_joins_graph_async(guild_id, days=days)
+        return cls(days=days, graph_file=graph_file)
+
+    async def on_range_change(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        days = int(self.range_select.values[0])
+        new_view = await GraphView.build(interaction.guild.id, days=days)
+        # edit_original_response goes through the webhook edit endpoint,
+        # which (unlike InteractionResponse.edit_message in some library
+        # versions) reliably accepts a brand-new file upload as an
+        # attachment — needed here since the range change means a whole
+        # new image, not just new text.
+        await interaction.edit_original_response(view=new_view, attachments=[new_view.file])
