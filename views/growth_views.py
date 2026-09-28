@@ -100,7 +100,7 @@ class GraphView(ui.LayoutView):
 
         self.container = ui.Container(
             ui.TextDisplay(f"# 📈 GROWTH TRENDS — LAST {days} DAYS"),
-            ui.MediaGallery(ui.MediaGalleryItem(graph_file)),
+            ui.MediaGallery(discord.MediaGalleryItem(graph_file)),
             ui.ActionRow(self.range_select),
             ui.TextDisplay(footer_line("Visual Intelligence")),
             accent_color=COLOR_BRAND,
