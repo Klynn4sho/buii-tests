@@ -4,10 +4,10 @@ pushing slash commands to a guild or globally.
 """
 
 import discord
+from discord import ui
 from discord.ext import commands
 
-from core.config import COLOR_BRAND
-from core.helpers import themed_footer
+from core.components import Layout, footer_line
 
 # Emoji + display label for each cog, keyed by the cog's registered name.
 # Anything not listed here (or not attached to a cog at all) falls into
@@ -16,47 +16,16 @@ from core.helpers import themed_footer
 COG_DISPLAY = {
     "GrowthCog": "🔗 Invites & Growth",
     "MusicCog": "🎵 Music",
+    "HierarchyCog": "🪪 Staff Directory",
     "AdminCog": "🛠️ Admin & Testing",
 }
-
-
-def _add_field_chunked(embed: discord.Embed, name: str, lines: list[str]) -> None:
-    """Splits a line list across multiple embed fields to stay under Discord's
-    1024-character field value limit.  The Music category easily hits this
-    with 9 hybrid commands + 3 manual slash entries.  Continuation fields use
-    a zero-width space as the name so the category label only renders once."""
-    LIMIT = 1024
-    chunks: list[list[str]] = []
-    current: list[str] = []
-    current_len = 0
-    for line in lines:
-        needed = len(line) + (1 if current else 0)  # +1 for the joining newline
-        if current_len + needed > LIMIT:
-            chunks.append(current)
-            current = [line]
-            current_len = len(line)
-        else:
-            current.append(line)
-            current_len += needed
-    if current:
-        chunks.append(current)
-    for i, chunk in enumerate(chunks):
-        embed.add_field(name=name if i == 0 else "\u200b", value="\n".join(chunk), inline=False)
 
 
 class AdminCog(commands.Cog, name="AdminCog"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    def _build_help_embed(self, current_prefix: str) -> discord.Embed:
-        embed = discord.Embed(
-            title="📖 Help Directory",
-            description=f"Server prefix: **`{current_prefix}`** — every command below also works as a `/slash` command.",
-            color=COLOR_BRAND
-        )
-        if self.bot.user:
-            embed.set_thumbnail(url=self.bot.user.display_avatar.url)
-
+    def _build_help_items(self, current_prefix: str) -> list:
         by_category: dict[str, list[str]] = {}
         for cmd in sorted(self.bot.commands, key=lambda c: c.name):
             if cmd.hidden or cmd.name in ("help", "h"):
@@ -74,21 +43,33 @@ class AdminCog(commands.Cog, name="AdminCog"):
         by_category["🎵 Music"].append("`/removesong <song_id>` — Remove a song and its votes from the database and playlist.")
 
         # Preferred display order; anything else appears after, alphabetically.
-        order = ["🎵 Music", "🏆 Leaderboards", "🔗 Invites & Growth", "⚙️ Server Configuration", "🛠️ Admin & Testing", "📦 Other"]
-        for label in order:
-            if label in by_category and by_category[label]:
-                _add_field_chunked(embed, label, sorted(set(by_category[label])))
-        for label in sorted(by_category.keys() - set(order)):
-            _add_field_chunked(embed, label, sorted(set(by_category[label])))
+        order = ["🎵 Music", "🏆 Leaderboards", "🔗 Invites & Growth", "🪪 Staff Directory", "⚙️ Server Configuration", "🛠️ Admin & Testing", "📦 Other"]
+        ordered_labels = [label for label in order if label in by_category and by_category[label]]
+        ordered_labels += sorted(by_category.keys() - set(order))
 
-        themed_footer(embed, self.bot, "Help Directory")
-        return embed
+        header_text = (
+            "# 📖 Help Directory\n"
+            f"Server prefix: **`{current_prefix}`** — every command below also works as a `/slash` command."
+        )
+        items = [ui.Section(ui.TextDisplay(header_text), accessory=ui.Thumbnail(media=self.bot.user.display_avatar.url))
+                 if self.bot.user else ui.TextDisplay(header_text)]
+        items.append(ui.Separator())
+
+        for i, label in enumerate(ordered_labels):
+            body = "\n".join(sorted(set(by_category[label])))
+            items.append(ui.TextDisplay(f"**{label}**\n{body}"))
+            if i < len(ordered_labels) - 1:
+                items.append(ui.Separator(spacing=discord.SeparatorSpacing.small))
+
+        items.append(ui.Separator())
+        items.append(ui.TextDisplay(footer_line("Help Directory")))
+        return items
 
     @commands.command(name="h", aliases=["help"])
     async def help_prefix(self, ctx: commands.Context):
         from core import database
         current_prefix = await database.async_get_prefix(ctx.guild.id) if ctx.guild else "b,"
-        await ctx.send(embed=self._build_help_embed(current_prefix))
+        await ctx.send(view=Layout(*self._build_help_items(current_prefix)))
 
     @commands.command(name="sync")
     @commands.has_permissions(administrator=True)
