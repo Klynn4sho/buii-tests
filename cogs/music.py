@@ -3,18 +3,25 @@ Music rating system: link detection & manual song search, the dynamic
 Pillow rating card, the 1-10 voting flow, Spotify auto-sync, the 12-hour
 auto-close sweep, the music leaderboard (with min-score filter + elapsed
 time), and admin song-management commands.
+
+Every response here is a Components V2 layout, not an embed. Per the
+project's rule (core/components.py): a bordered Container is used only
+where interactive buttons are actually attached (the rating card itself,
+the renumber confirm prompt); every plain confirmation or listing is
+borderless TextDisplay content.
 """
 
 from datetime import datetime, timezone, timedelta
 
 import discord
-from discord import app_commands
+from discord import app_commands, ui
 from discord.ext import commands, tasks
 
 from core import database
 from core.checks import has_mod_permission
-from core.config import COLOR_SUCCESS, COLOR_WARNING, COLOR_DANGER, COLOR_BRAND, RATING_WINDOW_HOURS
-from core.helpers import themed_footer, create_music_card, format_elapsed
+from core.config import RATING_WINDOW_HOURS
+from core.components import SimpleLayout, Layout, footer_line
+from core.helpers import create_music_card, format_elapsed
 from core.music_utils import (
     find_music_link, fetch_song_metadata, search_song_metadata,
     lookup_song_genre, sync_to_spotify, remove_from_spotify,
@@ -29,6 +36,12 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
     async def cog_load(self):
         for row in await database.get_recent_songs(limit=500):
+            # Persistent-view registration is purely local bookkeeping —
+            # discord.py never transmits this object anywhere, it only uses
+            # it to route future button clicks by custom_id. So constructing
+            # RatingView here with no title/card_file (both default to
+            # placeholders) is safe: the already-posted message on Discord's
+            # side is untouched, this just re-wires the click handlers.
             self.bot.add_view(RatingView(row["id"]))
 
     def cog_unload(self):
@@ -53,10 +66,9 @@ class MusicCog(commands.Cog, name="MusicCog"):
                 if channel and row["message_id"]:
                     try:
                         message = await channel.fetch_message(row["message_id"])
+                        song = await database.get_song(row["id"])
                         avg, count = await database.get_song_stats(row["id"])
-                        new_embed = message.embeds[0].copy() if message.embeds else discord.Embed()
-                        new_embed.set_footer(text=f"ID: {row['id']} • 🔒 Voting closed after {RATING_WINDOW_HOURS} hours • Final: {avg:.1f}/10 ({count} votes)")
-                        await message.edit(embed=new_embed, view=ClosedRatingView())
+                        await message.edit(view=ClosedRatingView(song, avg, count))
                     except Exception:
                         pass
         except Exception:
@@ -77,11 +89,10 @@ class MusicCog(commands.Cog, name="MusicCog"):
             await discord.utils.sleep_until(discord.utils.utcnow() + timedelta(seconds=duration))
             overwrite.send_messages = None
             await channel.set_permissions(channel.guild.default_role, overwrite=overwrite, reason="Music cooldown expired")
-            embed = discord.Embed(
-                description="🔓 **Channel unlocked** — you can now post the next track!",
-                color=COLOR_SUCCESS
+            await channel.send(
+                view=SimpleLayout("🔓 **Channel unlocked** — you can now post the next track!"),
+                delete_after=30,
             )
-            await channel.send(embed=embed, delete_after=30)
         except Exception:
             pass
 
@@ -104,15 +115,13 @@ class MusicCog(commands.Cog, name="MusicCog"):
             if existing_channel and existing["message_id"]:
                 jump_text = f"https://discord.com/channels/{guild_id}/{existing['channel_id']}/{existing['message_id']}"
             avg, count = await database.get_song_stats(existing["id"])
-            desc = f"**{existing['title']}**" + (f" by **{existing['artist']}**" if existing['artist'] else "")
+            desc = f"🔁 **Already Posted**\n{requester.mention}\n\n"
+            desc += f"**{existing['title']}**" + (f" by **{existing['artist']}**" if existing['artist'] else "")
             desc += f"\nCurrent rating: ⭐ **{avg:.1f}/10** ({count} votes)"
             if jump_text:
                 desc += f"\n\n[Jump to the original post]({jump_text})"
-            embed = discord.Embed(title="🔁 Already Posted", description=desc, color=COLOR_WARNING)
-            if existing["cover_url"]:
-                embed.set_thumbnail(url=existing["cover_url"])
-            themed_footer(embed, self.bot, "Duplicate Detection")
-            await channel.send(content=requester.mention, embed=embed)
+            desc += "\n" + footer_line("Duplicate Detection")
+            await channel.send(view=SimpleLayout(desc), allowed_mentions=discord.AllowedMentions(users=True))
             return None
 
         genre = await lookup_song_genre(self.bot.http_session, title, artist)
@@ -123,28 +132,21 @@ class MusicCog(commands.Cog, name="MusicCog"):
         card_bytes, dominant_rgb = await create_music_card(self.bot.http_session, title, artist, cover_url, 0.0, 0, genre=genre)
         file = discord.File(fp=card_bytes, filename="rating_card.png")
 
-        embed = discord.Embed(color=discord.Color.from_rgb(*dominant_rgb), timestamp=datetime.now(timezone.utc))
-        embed.set_image(url="attachment://rating_card.png")
-        embed.set_author(name=f"Requested by {requester.display_name}", icon_url=requester.display_avatar.url)
-
-        link_parts = []
-        if preview_url:
-            link_parts.append(f"[▶️ Preview]({preview_url})")
-        if url:
-            link_parts.append(f"[🔗 Source]({url})")
-        if link_parts:
-            embed.description = " • ".join(link_parts)
-
-        embed.set_footer(text=f"ID: {song_id} • Rate it using the buttons below")
-        view = RatingView(song_id)
-
         role_id_str, lock_time, _ = await database.async_get_music_config(guild_id)
         mentions = [requester.mention]
         if role_id_str:
             mentions.append(f"<@&{role_id_str}>")
-        content = " ".join(mentions)
+        # Mentions have to live inside the TextDisplay content instead of a
+        # message-level `content=` field — Components V2 messages can't
+        # combine `content`/`embeds` with a view, but a mention placed
+        # inside TextDisplay text still pings normally.
+        ping_text = " ".join(mentions)
 
-        msg = await channel.send(content=content, embed=embed, file=file, view=view, allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+        view = RatingView(song_id, title=title, artist=artist, requester_name=requester.display_name,
+                           preview_url=preview_url, url=url, card_file=file,
+                           accent_rgb=dominant_rgb, ping_text=ping_text)
+
+        msg = await channel.send(view=view, file=file, allowed_mentions=discord.AllowedMentions(users=True, roles=True))
         await database.set_song_message_id(song_id, msg.id)
 
         if lock_time and int(lock_time) > 0 and isinstance(channel, discord.TextChannel):
@@ -186,26 +188,19 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
         lines = []
         for row in rows:
-            user_id = row["user_id"]
-            score = row["score"]
-            member = ctx.guild.get_member(user_id) if ctx.guild else None
-            user_mention = member.mention if member else f"<@{user_id}>"
-            lines.append(f"• {user_mention} — Score: **{score}/10**")
+            member = ctx.guild.get_member(row["user_id"]) if ctx.guild else None
+            user_mention = member.mention if member else f"<@{row['user_id']}>"
+            lines.append(f"• {user_mention} — Score: **{row['score']}/10**")
 
         avg, count = await database.get_song_stats(song_id)
         artist_str = f" by **{song['artist']}**" if song['artist'] else ""
 
-        embed = discord.Embed(
-            title=f"🔍 Rating Inspection for '{song['title']}'{artist_str}",
-            description=f"**Song ID:** `{song_id}` | **Overall:** ⭐ **{avg:.1f}/10** ({count} votes)\n\n" + "\n".join(lines),
-            color=COLOR_BRAND,
-            timestamp=datetime.now(timezone.utc)
+        text = (
+            f"## 🔍 Rating Inspection for '{song['title']}'{artist_str}\n"
+            f"**Song ID:** `{song_id}` | **Overall:** ⭐ **{avg:.1f}/10** ({count} votes)\n\n"
+            + "\n".join(lines) + "\n" + footer_line("Admin Rating Inspector")
         )
-        if song["cover_url"]:
-            embed.set_thumbnail(url=song["cover_url"])
-        themed_footer(embed, self.bot, "Admin Rating Inspector")
-
-        await ctx.send(embed=embed, ephemeral=True)
+        await ctx.send(view=SimpleLayout(text), ephemeral=True)
 
     @commands.hybrid_command(name="closevoting", description="Freeze a song's score so no new votes can be cast.")
     @has_mod_permission()
@@ -222,20 +217,26 @@ class MusicCog(commands.Cog, name="MusicCog"):
         avg, count = await database.get_song_stats(song_id)
         artist_str = f" by **{song['artist']}**" if song["artist"] else ""
 
-        embed = discord.Embed(
-            title="🔒 VOTING CLOSED",
-            description=(
-                f"**{song['title']}**{artist_str}\n"
-                f"Final score: ⭐ **{avg:.1f}/10** ({count} vote{'s' if count != 1 else ''})\n\n"
-                f"*No further votes will be accepted for this track.*"
-            ),
-            color=COLOR_DANGER,
-            timestamp=datetime.now(timezone.utc)
+        # Also grey out the live rating buttons on the original message, not
+        # just announce closure here — matches what the 12h auto-close sweep
+        # already does, so a manual close and a timed close look the same.
+        if song["channel_id"] and song["message_id"]:
+            channel = self.bot.get_channel(song["channel_id"])
+            if channel:
+                try:
+                    message = await channel.fetch_message(song["message_id"])
+                    await message.edit(view=ClosedRatingView(song, avg, count))
+                except Exception:
+                    pass
+
+        text = (
+            "## 🔒 VOTING CLOSED\n"
+            f"**{song['title']}**{artist_str}\n"
+            f"Final score: ⭐ **{avg:.1f}/10** ({count} vote{'s' if count != 1 else ''})\n\n"
+            "*No further votes will be accepted for this track.*\n"
+            + footer_line("Admin Voting Control")
         )
-        if song["cover_url"]:
-            embed.set_thumbnail(url=song["cover_url"])
-        themed_footer(embed, self.bot, "Admin Voting Control")
-        await ctx.send(embed=embed)
+        await ctx.send(view=SimpleLayout(text))
 
     @commands.hybrid_command(name="synctoplaylist", description="Manually add a song to the Spotify playlist, regardless of its score.")
     @has_mod_permission()
@@ -256,16 +257,12 @@ class MusicCog(commands.Cog, name="MusicCog"):
         if success:
             await database.mark_song_synced(song_id)
             artist_str = f" by **{song['artist']}**" if song["artist"] else ""
-            embed = discord.Embed(
-                title="✅ SYNCED TO PLAYLIST",
-                description=f"**{song['title']}**{artist_str} was manually added to the server Spotify playlist.",
-                color=COLOR_SUCCESS,
-                timestamp=datetime.now(timezone.utc)
+            text = (
+                "## ✅ SYNCED TO PLAYLIST\n"
+                f"**{song['title']}**{artist_str} was manually added to the server Spotify playlist.\n"
+                + footer_line("Manual Spotify Sync")
             )
-            if song["cover_url"]:
-                embed.set_thumbnail(url=song["cover_url"])
-            themed_footer(embed, self.bot, "Manual Spotify Sync")
-            await ctx.send(embed=embed, ephemeral=True)
+            await ctx.send(view=SimpleLayout(text), ephemeral=True)
         else:
             await ctx.send(
                 "❌ Spotify sync failed. Check that `SPOTIFY_USER_TOKEN` and `SPOTIFY_PLAYLIST_ID` are set and the token has the `playlist-modify` scope.",
@@ -282,46 +279,42 @@ class MusicCog(commands.Cog, name="MusicCog"):
         avg_score = stats["avg_given"] or 0.0
         total_votes = stats["total"]
 
-        embed = discord.Embed(title=f"📊 {ctx.author.display_name}'s Music Profile", color=discord.Color(0x2BC7C4), timestamp=datetime.now(timezone.utc))
-        embed.set_thumbnail(url=ctx.author.display_avatar.url)
-        embed.add_field(name="Total Songs Rated", value=f"**{total_votes}**", inline=True)
-        embed.add_field(name="Average Score Given", value=f"**⭐ {avg_score:.1f}/10**", inline=True)
-
+        text = (
+            f"## 📊 {ctx.author.display_name}'s Music Profile\n"
+            f"Total Songs Rated: **{total_votes}**\n"
+            f"Average Score Given: **⭐ {avg_score:.1f}/10**\n"
+        )
         if top_rated:
             lines = []
             for idx, song in enumerate(top_rated, start=1):
                 artist = f" — {song['artist']}" if song['artist'] else ""
                 lines.append(f"**{idx}. {song['title']}{artist}** (Your Score: **{song['score']}/10**)")
-            embed.add_field(name="🔝 Your Highest Rated Tracks", value="\n".join(lines), inline=False)
+            text += "\n**🔝 Your Highest Rated Tracks**\n" + "\n".join(lines) + "\n"
+        text += footer_line("Personal Music Taste Profile")
 
-        themed_footer(embed, self.bot, "Personal Music Taste Profile")
-        await ctx.send(embed=embed, ephemeral=True)
+        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=ctx.author.display_avatar.url))]
+        await ctx.send(view=Layout(*items), ephemeral=True)
 
     @commands.hybrid_command(name="setmusicchannel", aliases=["smc"], description="Restrict music link detection to a specific channel, or 'off' to allow any channel.")
     @has_mod_permission()
     async def setmusicchannel(self, ctx: commands.Context, channel: discord.TextChannel = None, off: bool = False):
         if off:
             await database.async_set_music_config(ctx.guild.id, channel_id=None)
-            embed = discord.Embed(title="🔕 MUSIC CHANNEL RESTRICTION CLEARED", description="Music links will now be detected in any channel.", color=COLOR_SUCCESS)
-            themed_footer(embed, self.bot)
-            await ctx.send(embed=embed)
+            await ctx.send(view=SimpleLayout("🔕 **MUSIC CHANNEL RESTRICTION CLEARED**\nMusic links will now be detected in any channel."))
             return
         target_channel = channel or ctx.channel
         await database.async_set_music_config(ctx.guild.id, channel_id=target_channel.id)
-        embed = discord.Embed(title="🎵 MUSIC CHANNEL BOUND", description=f"Music link detection restricted to {target_channel.mention}.", color=COLOR_SUCCESS)
-        themed_footer(embed, self.bot)
-        await ctx.send(embed=embed)
+        await ctx.send(view=SimpleLayout(f"🎵 **MUSIC CHANNEL BOUND**\nMusic link detection restricted to {target_channel.mention}."))
 
     @commands.hybrid_command(name="setmusicrole", description="Select a role to ping when a new song is posted. Omit the role to clear it.")
     @has_mod_permission()
     async def setmusicrole(self, ctx: commands.Context, role: discord.Role = None):
         if role is None:
             await database.async_set_music_config(ctx.guild.id, role_id=None)
-            embed = discord.Embed(title="🔕 MUSIC ROLE CLEARED", description="New song posts will no longer ping a role.", color=COLOR_SUCCESS)
+            await ctx.send(view=SimpleLayout("🔕 **MUSIC ROLE CLEARED**\nNew song posts will no longer ping a role."))
         else:
             await database.async_set_music_config(ctx.guild.id, role_id=role.id)
-            embed = discord.Embed(title="🔔 MUSIC ROLE UPDATED", description=f"Will now ping {role.mention} for new songs.", color=COLOR_SUCCESS)
-        await ctx.send(embed=embed)
+            await ctx.send(view=SimpleLayout(f"🔔 **MUSIC ROLE UPDATED**\nWill now ping {role.mention} for new songs."))
 
     @commands.hybrid_command(name="setmusiclock", description="Set channel lock duration (in seconds) after a song is posted. Omit seconds to disable the lock.")
     @has_mod_permission()
@@ -331,8 +324,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             return
         await database.async_set_music_config(ctx.guild.id, lock_time=seconds)
         status = f"Channel will lock for **{seconds} seconds**." if seconds > 0 else "Channel lock disabled."
-        embed = discord.Embed(title="⏱️ MUSIC COOLDOWN UPDATED", description=status, color=COLOR_SUCCESS)
-        await ctx.send(embed=embed)
+        await ctx.send(view=SimpleLayout(f"⏱️ **MUSIC COOLDOWN UPDATED**\n{status}"))
 
     @commands.command(name="song")
     async def song_command(self, ctx: commands.Context, *, query: str):
@@ -366,8 +358,8 @@ class MusicCog(commands.Cog, name="MusicCog"):
             lines.append(f"**{i}. {title}{artist}** (ID: `{row['id']}`) — ⭐ {row['avg_score']:.1f}/10 ({row['votes']} votes) • 🕒 {elapsed}")
 
         title_text = "🏆 Top Rated Songs" if min_score == 0.0 else f"🏆 Top Rated Songs (≥ {min_score}/10)"
-        embed = discord.Embed(title=title_text, description="\n".join(lines), color=discord.Color.gold())
-        await interaction.response.send_message(embed=embed)
+        text = f"## {title_text}\n" + "\n".join(lines)
+        await interaction.response.send_message(view=SimpleLayout(text))
 
     @app_commands.command(name="removesong", description="Removes a song and its votes from the database and Spotify playlist.")
     @app_commands.checks.has_permissions(manage_messages=True)
@@ -398,26 +390,15 @@ class MusicCog(commands.Cog, name="MusicCog"):
     @commands.hybrid_command(name="renumbersongs", description="Re-sequences song IDs to close gaps left by deletions, and repairs live rating buttons.")
     @commands.has_permissions(administrator=True)
     async def renumbersongs(self, ctx: commands.Context):
-        warn_embed = discord.Embed(
-            title="⚠️ Renumber Song IDs",
-            description=(
-                "This will reassign every song's ID to a dense sequence and update all linked ratings.\n\n"
-                "The bot will then try to **re-edit every live rating message** so its buttons still work. "
-                "Messages the bot can't reach (deleted, channel removed, missing permissions) will keep stale "
-                "buttons that fail silently until re-posted.\n\n"
-                "This cannot be undone. Continue?"
-            ),
-            color=COLOR_DANGER
-        )
         view = RenumberConfirmView(ctx.author.id)
-        confirm_msg = await ctx.send(embed=warn_embed, view=view)
+        confirm_msg = await ctx.send(view=view)
 
         await view.wait()
         if not view.confirmed:
-            await confirm_msg.edit(content="❌ Renumber cancelled.", embed=None, view=None)
+            await confirm_msg.edit(view=SimpleLayout("❌ Renumber cancelled."))
             return
 
-        await confirm_msg.edit(content="⏳ Renumbering songs and repairing rating messages...", embed=None, view=None)
+        await confirm_msg.edit(view=SimpleLayout("⏳ Renumbering songs and repairing rating messages..."))
 
         mapping = await database.renumber_songs()
 
@@ -432,29 +413,42 @@ class MusicCog(commands.Cog, name="MusicCog"):
                 continue
             try:
                 message = await channel.fetch_message(row["message_id"])
-                await message.edit(view=RatingView(row["new_id"]))
+                song = await database.get_song(row["new_id"])
+                avg, count = await database.get_song_stats(row["new_id"])
+                if song and song.get("closed"):
+                    await message.edit(view=ClosedRatingView(song, avg, count))
+                else:
+                    new_view = RatingView(
+                        row["new_id"], title=song["title"] if song else None,
+                        artist=song["artist"] if song else None,
+                        requester_name=song["requested_by_name"] if song else None,
+                        avg=avg, count=count,
+                        preview_url=song["preview_url"] if song else None,
+                        url=song["url"] if song else None,
+                        # A string in the attachment://<filename> format
+                        # references the message's *existing* attachment
+                        # instead of uploading a new one — we're only
+                        # repointing the buttons' custom_ids to the new song
+                        # id, not touching the image, so nothing needs
+                        # re-rendering or re-uploading here.
+                        card_file="attachment://rating_card.png",
+                    )
+                    await message.edit(view=new_view)
                 repaired += 1
             except Exception:
                 failed += 1
 
-        result_embed = discord.Embed(
-            title="✅ Renumber Complete",
-            description=(
-                f"┣ IDs reassigned: **{len(mapping)}**\n"
-                f"┣ Unchanged (already sequential): **{unchanged}**\n"
-                f"┣ Rating messages repaired: **{repaired}**\n"
-                f"┗ Messages that couldn't be repaired: **{failed}**"
-            ),
-            color=COLOR_SUCCESS
+        result_text = (
+            "## ✅ Renumber Complete\n"
+            f"┣ IDs reassigned: **{len(mapping)}**\n"
+            f"┣ Unchanged (already sequential): **{unchanged}**\n"
+            f"┣ Rating messages repaired: **{repaired}**\n"
+            f"┗ Messages that couldn't be repaired: **{failed}**"
         )
         if failed:
-            result_embed.add_field(
-                name="Note",
-                value="Songs with unreachable messages still work via commands (`/songratings`, `/closevoting`, etc.) — only their Discord buttons are stale.",
-                inline=False
-            )
-        themed_footer(result_embed, self.bot, "Admin Database Maintenance")
-        await ctx.send(embed=result_embed)
+            result_text += "\n\n*Songs with unreachable messages still work via commands (`/songratings`, `/closevoting`, etc.) — only their Discord buttons are stale.*"
+        result_text += "\n" + footer_line("Admin Database Maintenance")
+        await ctx.send(view=SimpleLayout(result_text))
 
 
 async def setup(bot: commands.Bot):
