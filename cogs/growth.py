@@ -3,19 +3,37 @@ Invite tracking & growth analytics: join/leave logging, risk scoring for
 new accounts, the live auto-refreshing dashboard panel, growth graphs,
 inviter leaderboard, and the guild config commands (log channel, alert
 role, mod role, prefix).
+
+Every response here is a Components V2 layout, not an embed. Per the
+project's rule (core/components.py), a bordered Container is used only
+where interactive buttons/selects are attached (the dashboard panel, the
+graph range picker); everything else — including the risk-tier join
+alerts — is borderless TextDisplay content. The risk color signal isn't
+lost: it survives via the 🚨/⚠️/🟢 status emoji and the 🟥/🟨/🟩 maturity
+bar, which already carried that meaning even inside the old embed.
 """
 
 import asyncio
+import io
 from datetime import datetime, timezone
 
 import discord
+from discord import ui
 from discord.ext import commands, tasks
 
 from core import database
 from core.checks import has_mod_permission
-from core.config import COLOR_DANGER, COLOR_WARNING, COLOR_SUCCESS, COLOR_BRAND
-from core.helpers import themed_footer, make_bar, account_maturity_bar, async_build_dashboard_embed, build_joins_graph_async
+from core.components import SimpleLayout, Layout, footer_line
+from core.helpers import make_bar, account_maturity_bar, build_joins_graph_async
 from views.growth_views import DashboardView, GraphView
+
+
+def _risk_status(account_age_days: int) -> str:
+    if account_age_days < 7:
+        return "🚨 EXTREME RISK (New Account)"
+    elif account_age_days < 30:
+        return "⚠️ HIGH RISK (Under 30 Days)"
+    return "🟢 LOW RISK (Established User)"
 
 
 class GrowthCog(commands.Cog, name="GrowthCog"):
@@ -26,11 +44,15 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         self._ready_once = False
 
     async def cog_load(self):
-        # Persistent views need to exist before Discord dispatches any
-        # interaction for them, and don't depend on gateway/guild state, so
-        # they're safe to register as soon as the cog loads.
+        # Persistent-view registration is purely local dispatch-table
+        # bookkeeping — discord.py never transmits these objects anywhere,
+        # so DashboardView()'s placeholder content and GraphView's dummy
+        # placeholder file (never actually uploaded) are both safe to use
+        # here; only the buttons'/select's custom_ids need to match.
         self.bot.add_view(DashboardView())
-        self.bot.add_view(GraphView())
+        self.bot.add_view(GraphView(days=30, graph_file=discord.File(
+            fp=io.BytesIO(b""), filename="joins_graph.png"
+        )))
 
     def cog_unload(self):
         self.panel_refresh_loop.cancel()
@@ -48,8 +70,8 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                 if channel:
                     try:
                         message = await channel.fetch_message(msg_id)
-                        new_embed = await async_build_dashboard_embed(guild, self.bot)
-                        await message.edit(embed=new_embed, view=DashboardView())
+                        new_view = await DashboardView.build(guild)
+                        await message.edit(view=new_view)
                     except Exception:
                         pass
 
@@ -106,19 +128,8 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             return
 
         now = datetime.now(timezone.utc)
-        account_created = member.created_at
-        age_timedelta = now - account_created
-        account_age_days = age_timedelta.days
-
-        if account_age_days < 7:
-            alert_status = "🚨 EXTREME RISK (New Account)"
-            embed_color = COLOR_DANGER
-        elif account_age_days < 30:
-            alert_status = "⚠️ HIGH RISK (Under 30 Days)"
-            embed_color = COLOR_WARNING
-        else:
-            alert_status = "🟢 LOW RISK (Established User)"
-            embed_color = COLOR_SUCCESS
+        account_age_days = (now - member.created_at).days
+        alert_status = _risk_status(account_age_days)
 
         await asyncio.sleep(1)
 
@@ -151,41 +162,25 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
 
         maturity_bar = account_maturity_bar(account_age_days)
 
-        embed = discord.Embed(color=embed_color, timestamp=datetime.now(timezone.utc))
-        embed.set_author(name=f"{member.name} joined the server", icon_url=member.display_avatar.url)
-        if member.avatar:
-            embed.set_thumbnail(url=member.avatar.url)
-
-        embed.add_field(
-            name="👤 User Information",
-            value=f"┣ User: **{member.mention}**\n┣ Username: **{member.name}**\n┗ User ID: `{member.id}`",
-            inline=True
-        )
-        embed.add_field(
-            name="🔗 Invite Details",
-            value=f"┣ Inviter: **{i_mention}**\n┣ Username: **{inviter}**\n┗ Code: `{used_code}`",
-            inline=True
-        )
-        embed.add_field(
-            name="🛡️ Security Risk Assessment",
-            value=(
-                f"**{alert_status}**\n"
-                f"`{maturity_bar}` **{account_age_days}d** old"
-            ),
-            inline=False
-        )
-        themed_footer(embed, self.bot, f"Member #{guild.member_count} • Total Members: {guild.member_count}")
-
-        alert_content = None
+        alert_role_mention = ""
         if account_age_days < 7:
             alert_role_id = await database.async_get_alert_role(guild.id)
             if alert_role_id:
                 alert_role = guild.get_role(alert_role_id)
                 if alert_role:
-                    alert_content = alert_role.mention
+                    alert_role_mention = alert_role.mention + "\n"
 
-        await welcome_channel.send(content=alert_content, embed=embed,
-                                    allowed_mentions=discord.AllowedMentions(roles=True))
+        text = (
+            alert_role_mention
+            + f"**{member.name} joined the server**\n\n"
+            + f"**👤 User Information**\n┣ User: {member.mention}\n┣ Username: **{member.name}**\n┗ User ID: `{member.id}`\n\n"
+            + f"**🔗 Invite Details**\n┣ Inviter: **{i_mention}**\n┣ Username: **{inviter}**\n┗ Code: `{used_code}`\n\n"
+            + f"**🛡️ Security Risk Assessment**\n**{alert_status}**\n`{maturity_bar}` **{account_age_days}d** old\n"
+            + footer_line(f"Member #{guild.member_count} • Total Members: {guild.member_count}")
+        )
+
+        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=member.display_avatar.url))]
+        await welcome_channel.send(view=Layout(*items), allowed_mentions=discord.AllowedMentions(roles=True))
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
@@ -194,50 +189,39 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
     # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
-    @commands.hybrid_command(name="testjoin", description="Simulate a member join event to test and preview the join alert embed.")
+    @commands.hybrid_command(name="testjoin", description="Simulate a member join event to test and preview the join alert layout.")
     @has_mod_permission()
     async def testjoin(self, ctx: commands.Context, account_age_days: int = 2):
-        now = datetime.now(timezone.utc)
-        if account_age_days < 7:
-            alert_status = "🚨 EXTREME RISK (New Account)"
-            embed_color = COLOR_DANGER
-        elif account_age_days < 30:
-            alert_status = "⚠️ HIGH RISK (Under 30 Days)"
-            embed_color = COLOR_WARNING
-        else:
-            alert_status = "🟢 LOW RISK (Established User)"
-            embed_color = COLOR_SUCCESS
-
+        alert_status = _risk_status(account_age_days)
         maturity_bar = account_maturity_bar(account_age_days)
 
-        embed = discord.Embed(color=embed_color, timestamp=now)
-        embed.set_author(name=f"{ctx.author.name} (TEST PREVIEW)", icon_url=ctx.author.display_avatar.url)
-        if ctx.author.avatar:
-            embed.set_thumbnail(url=ctx.author.avatar.url)
+        text = (
+            "🧪 **Test Join Alert Preview**\n\n"
+            f"**{ctx.author.name} (TEST PREVIEW)**\n\n"
+            f"**👤 User Information**\n┣ User: {ctx.author.mention}\n┣ Username: **{ctx.author.name}**\n┗ User ID: `{ctx.author.id}`\n\n"
+            f"**🔗 Invite Details**\n┣ Inviter: **{ctx.author.mention}**\n┣ Username: **TestInviter#0001**\n┗ Code: `TESTCODE`\n\n"
+            f"**🛡️ Security Risk Assessment**\n**{alert_status}**\n`{maturity_bar}` **{account_age_days}d** old\n"
+            + footer_line(f"Member #{ctx.guild.member_count} • Total Members: {ctx.guild.member_count} (TEST PREVIEW)")
+        )
 
-        embed.add_field(name="👤 User Information", value=f"┣ User: **{ctx.author.mention}**\n┣ Username: **{ctx.author.name}**\n┗ User ID: `{ctx.author.id}`", inline=True)
-        embed.add_field(name="🔗 Invite Details", value=f"┣ Inviter: **{ctx.author.mention}**\n┣ Username: **TestInviter#0001**\n┗ Code: `TESTCODE`", inline=True)
-        embed.add_field(name="🛡️ Security Risk Assessment", value=(f"**{alert_status}**\n`{maturity_bar}` **{account_age_days}d** old"), inline=False)
-        themed_footer(embed, self.bot, f"Member #{ctx.guild.member_count} • Total Members: {ctx.guild.member_count} (TEST PREVIEW)")
-
-        await ctx.send(content="🧪 **Test Join Alert Preview:**", embed=embed)
+        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=ctx.author.display_avatar.url))]
+        await ctx.send(view=Layout(*items))
 
     @commands.hybrid_command(name="leaderboard", aliases=["lb"], description="Displays top inviters based on recorded join history.")
     async def leaderboard(self, ctx: commands.Context):
         results = await database.async_get_leaderboard(ctx.guild.id, limit=10)
-        embed = discord.Embed(title="🏆 INVITER LEADERBOARD", description="Top server inviters ranked by recorded join history.", color=COLOR_BRAND, timestamp=datetime.now(timezone.utc))
+
+        text = "# 🏆 INVITER LEADERBOARD\n-# Top server inviters ranked by recorded join history.\n\n"
         if results:
             medals = ["🥇", "🥈", "🥉"]
-            lines = []
-            for idx, (inviter_name, count) in enumerate(results):
-                medal = medals[idx] if idx < 3 else f"`#{idx+1}`"
-                lines.append(f"{medal} **{inviter_name}** — **{count} joins**")
-            embed.add_field(name="Top Rankings", value="\n".join(lines), inline=False)
+            lines = [f"{medals[idx] if idx < 3 else f'`#{idx+1}`'} **{name}** — **{count} joins**"
+                     for idx, (name, count) in enumerate(results)]
+            text += "\n".join(lines)
         else:
-            embed.add_field(name="Top Rankings", value="*No tracked join data available yet.*", inline=False)
+            text += "*No tracked join data available yet.*"
+        text += "\n" + footer_line("Leaderboard Metrics")
 
-        themed_footer(embed, self.bot, "Leaderboard Metrics")
-        await ctx.send(embed=embed)
+        await ctx.send(view=SimpleLayout(text))
 
     @commands.hybrid_command(name="invites", description="View a member's invite history and stats.")
     async def invites(self, ctx: commands.Context, member: discord.Member = None):
@@ -253,27 +237,24 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         retained = total_joins - left_count
         retention_pct = (retained / total_joins * 100) if total_joins else 0.0
 
-        embed = discord.Embed(
-            title=f"🔗 {member.display_name}'s Invite Stats",
-            color=COLOR_BRAND,
-            timestamp=datetime.now(timezone.utc)
+        text = (
+            f"# 🔗 {member.display_name}'s Invite Stats\n"
+            f"Total Invites: **{total_joins}**\n"
+            f"Still in Server: **{retained}** (**{retention_pct:.0f}%**)\n"
+            f"Left Since Joining: **{left_count}**\n"
         )
-        embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="Total Invites", value=f"**{total_joins}**", inline=True)
-        embed.add_field(name="Still in Server", value=f"**{retained}** (**{retention_pct:.0f}%**)", inline=True)
-        embed.add_field(name="Left Since Joining", value=f"**{left_count}**", inline=True)
         if flagged_alts:
-            embed.add_field(name="🚩 Flagged New Accounts", value=f"**{flagged_alts}** invited account(s) were under 7 days old at join time.", inline=False)
-
+            text += f"\n🚩 **Flagged New Accounts**\n**{flagged_alts}** invited account(s) were under 7 days old at join time.\n"
         if recent:
             lines = []
             for row in recent:
                 age_flag = " 🚩" if row["account_age_days"] < 7 else ""
                 lines.append(f"• **{row['user_name']}**{age_flag} — {row['join_date']}")
-            embed.add_field(name="🕒 Most Recent Invitees", value="\n".join(lines), inline=False)
+            text += "\n**🕒 Most Recent Invitees**\n" + "\n".join(lines) + "\n"
+        text += footer_line("Invite Attribution — matched by username at join time")
 
-        themed_footer(embed, self.bot, "Invite Attribution — matched by username at join time")
-        await ctx.send(embed=embed)
+        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=member.display_avatar.url))]
+        await ctx.send(view=Layout(*items))
 
     @commands.hybrid_command(name="statspanel", aliases=["sp"], description="Deploys an auto-refreshing live server growth dashboard.")
     @has_mod_permission()
@@ -289,38 +270,32 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                 except Exception:
                     pass
 
-        embed = await async_build_dashboard_embed(ctx.guild, self.bot)
-        panel_message = await ctx.send(embed=embed, view=DashboardView())
+        view = await DashboardView.build(ctx.guild)
+        panel_message = await ctx.send(view=view)
         await database.async_save_panel_config(ctx.guild.id, ctx.channel.id, panel_message.id)
 
     @commands.hybrid_command(name="graph", aliases=["g"], description="Displays daily growth trend charts.")
     @has_mod_permission()
     async def graph(self, ctx: commands.Context, days: int = 30):
-        graph_file = await build_joins_graph_async(ctx.guild.id, days=days)
-        embed = discord.Embed(title=f"📈 GROWTH TRENDS — LAST {days} DAYS", color=COLOR_BRAND, timestamp=datetime.now(timezone.utc))
-        embed.set_image(url="attachment://joins_graph.png")
-        themed_footer(embed, self.bot, "Visual Intelligence")
-        await ctx.send(embed=embed, file=graph_file, view=GraphView())
+        view = await GraphView.build(ctx.guild.id, days=days)
+        await ctx.send(view=view, file=view.file)
 
     @commands.hybrid_command(name="setlog", aliases=["sl"], description="Lock incoming join alert notifications to this channel.")
     @has_mod_permission()
     async def setlog(self, ctx: commands.Context):
         await database.async_set_guild_log_channel(ctx.guild.id, ctx.channel.id)
-        embed = discord.Embed(title="🎯 LOG CHANNEL LOCKED", description=f"Join notification alerts successfully locked to {ctx.channel.mention}.", color=COLOR_SUCCESS)
-        themed_footer(embed, self.bot)
-        await ctx.send(embed=embed)
+        await ctx.send(view=SimpleLayout(f"🎯 **LOG CHANNEL LOCKED**\nJoin notification alerts successfully locked to {ctx.channel.mention}."))
 
     @commands.hybrid_command(name="setalertrole", aliases=["sar"], description="Set the role pinged when a high-risk (new account) join is detected.")
     @has_mod_permission()
     async def setalertrole(self, ctx: commands.Context, role: discord.Role = None):
         if role is None:
             await database.async_set_alert_role(ctx.guild.id, None)
-            embed = discord.Embed(title="🔕 ALERT ROLE CLEARED", description="Extreme-risk join alerts will no longer ping a role.", color=COLOR_SUCCESS)
+            text = "🔕 **ALERT ROLE CLEARED**\nExtreme-risk join alerts will no longer ping a role."
         else:
             await database.async_set_alert_role(ctx.guild.id, role.id)
-            embed = discord.Embed(title="🚨 ALERT ROLE SET", description=f"Will now ping {role.mention} when an extreme-risk (new account, <7d old) join is detected.", color=COLOR_SUCCESS)
-        themed_footer(embed, self.bot)
-        await ctx.send(embed=embed)
+            text = f"🚨 **ALERT ROLE SET**\nWill now ping {role.mention} when an extreme-risk (new account, <7d old) join is detected."
+        await ctx.send(view=SimpleLayout(text))
 
     @commands.hybrid_command(name="setmodrole", description="Set a role that can manage bot config commands without full Manage Server permission.")
     @commands.has_permissions(administrator=True)
@@ -329,12 +304,11 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         # mod role shouldn't be able to grant/change/revoke itself.
         if role is None:
             await database.async_set_mod_role(ctx.guild.id, None)
-            embed = discord.Embed(title="🔕 MOD ROLE CLEARED", description="Only members with Manage Server can use bot config commands now.", color=COLOR_SUCCESS)
+            text = "🔕 **MOD ROLE CLEARED**\nOnly members with Manage Server can use bot config commands now."
         else:
             await database.async_set_mod_role(ctx.guild.id, role.id)
-            embed = discord.Embed(title="🛠️ MOD ROLE SET", description=f"{role.mention} can now use bot config commands (setlog, setprefix, music settings, etc.) without needing Manage Server.", color=COLOR_SUCCESS)
-        themed_footer(embed, self.bot)
-        await ctx.send(embed=embed)
+            text = f"🛠️ **MOD ROLE SET**\n{role.mention} can now use bot config commands (setlog, setprefix, music settings, etc.) without needing Manage Server."
+        await ctx.send(view=SimpleLayout(text))
 
     @commands.hybrid_command(name="setprefix", aliases=["pfx"], description="Modify server command prefix.")
     @has_mod_permission()
@@ -343,9 +317,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             await ctx.send("⚠️ Prefix length must be 5 characters or fewer.")
             return
         await database.async_set_prefix(ctx.guild.id, new_prefix)
-        embed = discord.Embed(title="🔧 PREFIX UPDATED", description=f"Server prefix successfully updated to `{new_prefix}`", color=COLOR_SUCCESS)
-        themed_footer(embed, self.bot)
-        await ctx.send(embed=embed)
+        await ctx.send(view=SimpleLayout(f"🔧 **PREFIX UPDATED**\nServer prefix successfully updated to `{new_prefix}`"))
 
 
 async def setup(bot: commands.Bot):
