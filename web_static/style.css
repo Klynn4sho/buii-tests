@@ -2622,3 +2622,36 @@ p {
   background: #C8CBD0;
   box-shadow: 0 0 26px rgba(244, 244, 242, 0.4);
 }
+
+/* Fix BUII logo after login */
+.brand-mark {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  flex: 0 0 48px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: url("./buii-logo.jpg") center / cover no-repeat;
+  color: transparent !important;
+  font-size: 0 !important;
+  box-shadow: 0 0 16px rgba(244, 244, 242, 0.2);
+}
+
+.brand-mark img {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+/* Remove underline from logout and dashboard links */
+.topbar a,
+.top-actions a,
+.menu-wrapper a,
+.user-menu a,
+.logout,
+.logout a {
+  text-decoration: none !important;
+}
+
