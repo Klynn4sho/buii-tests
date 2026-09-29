@@ -2583,42 +2583,6 @@ p {
 .config-field .small-button {
     flex-shrink: 0;
 }
-/* Force dark gray graphite mode */
-:root,
-:root[data-theme="graphite"] {
-  --bg: #0D0E10 !important;
-  --surface: #191B1F !important;
-  --surface2: #22242A !important;
-  --text: #F4F4F2 !important;
-  --muted: #8A8D93 !important;
-  --line: #303238 !important;
-  --accent: #F4F4F2 !important;
-  --accent-soft: rgba(244, 244, 242, 0.08) !important;
-  --ink: #000000 !important;
-}
-
-html,
-body {
-  background: #0D0E10 !important;
-  color: #F4F4F2 !important;
-}
-
-.login-gate,
-.app,
-.topbar,
-.sidebar {
-  background: #0D0E10 !important;
-  color: #F4F4F2 !important;
-}
-
-.login-card,
-.card,
-.panel,
-.server-card,
-.stat-card {
-  background: #191B1F !important;
-  border-color: #303238 !important;
-}
 
 /* Prevent the logo image from expanding */
 .brand-mark {
