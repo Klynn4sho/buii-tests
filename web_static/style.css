@@ -111,6 +111,7 @@
     --accent: #ff5b22;
     --accent-soft: rgba(255, 91, 34, .10);
     --ink: #ffffff;
+}
 
 :root[data-theme="rose"] {
     --bg: #faf0f4;
