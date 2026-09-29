@@ -2583,3 +2583,78 @@ p {
 .config-field .small-button {
     flex-shrink: 0;
 }
+/* Force dark gray graphite mode */
+:root,
+:root[data-theme="graphite"] {
+  --bg: #0D0E10 !important;
+  --surface: #191B1F !important;
+  --surface2: #22242A !important;
+  --text: #F4F4F2 !important;
+  --muted: #8A8D93 !important;
+  --line: #303238 !important;
+  --accent: #F4F4F2 !important;
+  --accent-soft: rgba(244, 244, 242, 0.08) !important;
+  --ink: #000000 !important;
+}
+
+html,
+body {
+  background: #0D0E10 !important;
+  color: #F4F4F2 !important;
+}
+
+.login-gate,
+.app,
+.topbar,
+.sidebar {
+  background: #0D0E10 !important;
+  color: #F4F4F2 !important;
+}
+
+.login-card,
+.card,
+.panel,
+.server-card,
+.stat-card {
+  background: #191B1F !important;
+  border-color: #303238 !important;
+}
+
+/* Prevent the logo image from expanding */
+.brand-mark {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  flex: 0 0 48px;
+  overflow: hidden;
+  border-radius: 50%;
+  display: block;
+  box-shadow:
+    0 0 16px rgba(244, 244, 242, 0.2),
+    0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.brand-mark img {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 50%;
+}
+
+.login-card {
+  overflow: hidden;
+}
+
+.primary-button {
+  background: #F4F4F2;
+  color: #000;
+  box-shadow: 0 0 18px rgba(244, 244, 242, 0.2);
+}
+
+.primary-button:hover {
+  background: #C8CBD0;
+  box-shadow: 0 0 26px rgba(244, 244, 242, 0.4);
+}

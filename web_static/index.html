@@ -1,19 +1,26 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="graphite">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Buii — Dashboard</title>
+<title>BUII — Dashboard</title>
 <link rel="stylesheet" href="style.css">
+<link rel="icon" type="image/png" href="./buii-favicon.png">
+<link rel="apple-touch-icon" href="./buii-favicon.png">
 </head>
 <body>
 
 <!-- ================= LOGIN GATE ================= -->
 <div class="login-gate" id="loginGate">
   <div class="login-card">
-    <div class="brand"><div class="brand-mark">↗</div><span>buii</span></div>
-    <h1>Manage Buii from the web.</h1>
-    <p class="muted">Log in with Discord to see the servers where you can manage Buii — invite tracking, music ratings, the staff directory, and server config.</p>
+    <div class="brand">
+      <div class="brand-mark">
+        <img src="./buii-logo.jpg" alt="BUII logo">
+      </div>
+      <span>BUII</span>
+    </div>
+    <h1>Manage BUII from the web.</h1>
+    <p class="muted">Log in with Discord to see the servers where you can manage BUII — invite tracking, music ratings, the staff directory, and server config.</p>
     <a class="primary-button" href="/login" id="loginBtn">Log in with Discord</a>
     <div class="login-error" id="loginError" style="display:none"></div>
   </div>
@@ -23,7 +30,7 @@
 
   <!-- ================= TOP BAR ================= -->
   <header class="topbar">
-    <div class="brand"><div class="brand-mark">↗</div><span>buii</span></div>
+    <div class="brand"><div class="brand-mark">↗</div><span>BUII</span></div>
     <div class="top-actions">
       <button class="pill" id="themeBtn">◐ <span>Theme</span></button>
 
@@ -90,7 +97,7 @@
             <div>
               <div class="eyebrow">Server overview</div>
               <h1>Make your server feel alive.</h1>
-              <p>Manage Buii without digging through Discord's command list. Growth, music ratings and staff structure, all in one place.</p>
+              <p>Manage BUII without digging through Discord's command list. Growth, music ratings and staff structure, all in one place.</p>
             </div>
             <div class="server-chip">
               <div class="server-icon" id="heroServerIcon">··</div>
@@ -144,7 +151,7 @@
           <div>
             <div class="eyebrow">Command reference</div>
             <h1>Commands</h1>
-            <p>Every command Buii supports, with the `/slash` and text-prefix form. There's no per-guild command toggle yet — this is a reference list, not a config panel.</p>
+            <p>Every command BUII supports, with the `/slash` and text-prefix form. There's no per-guild command toggle yet — this is a reference list, not a config panel.</p>
           </div>
         </div>
         <div class="toolbar">
@@ -263,7 +270,7 @@
           <div>
             <div class="eyebrow">Server analytics</div>
             <h1>Statistics</h1>
-            <p>Real numbers from Buii's own database and live connection — nothing here is simulated.</p>
+            <p>Real numbers from BUII's own database and live connection — nothing here is simulated.</p>
           </div>
           <select class="period-select" id="growthPeriod" onchange="loadGrowthChart(currentGuildId)">
             <option value="30">Last 30 days</option>
@@ -303,7 +310,7 @@
         </div>
       </section>
 
-      <div class="footer-note">Buii dashboard · responsive by design</div>
+      <div class="footer-note">BUII dashboard · responsive by design</div>
     </main>
   </div>
 
@@ -402,7 +409,7 @@ function showApp() {
   if (currentGuildId) selectServer(currentGuildId);
   else {
     document.getElementById("serverList").innerHTML =
-      '<div class="muted" style="padding:12px">No manageable servers found — you need Manage Server permission in a server Buii is also in.</div>';
+      '<div class="muted" style="padding:12px">No manageable servers found — you need Manage Server permission in a server BUII is also in.</div>';
   }
 
   showPage(location.hash.replace("#", "") || "home");
