@@ -58,3 +58,23 @@ MODERATION_PERMISSIONS = [
 # they carry a moderation permission (e.g. a mute role that has
 # manage_messages revoked per-channel, or an internal bot-handling role).
 HIERARCHY_IGNORED_ROLE_NAMES = ["Muted", "Bot Handler"]
+
+# --- Web dashboard (Discord OAuth2 + Flask session) ---
+# A Discord application's Client ID/Secret (developer portal -> OAuth2),
+# and the exact redirect URI registered there — must match byte-for-byte,
+# scheme included (http vs https matters).
+DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID")
+DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET")
+DISCORD_REDIRECT_URI = os.environ.get("DISCORD_REDIRECT_URI")
+
+# Signs the Flask session cookie. MUST be set to a long random value in any
+# real deployment — Flask falls back to an insecure dev default otherwise,
+# which would let anyone forge a logged-in session. Generate one with:
+#   python -c "import secrets; print(secrets.token_hex(32))"
+FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY")
+
+# Manage Guild (0x20) or Administrator (0x8) — the same bar /setlog,
+# /setalertrole, etc. already require via has_mod_permission(). A user only
+# sees a guild in the dashboard's server switcher if their permissions
+# bitfield (from Discord's /users/@me/guilds) has one of these bits set.
+DASHBOARD_REQUIRED_PERMS = 0x20 | 0x8

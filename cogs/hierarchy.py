@@ -50,18 +50,17 @@ class HierarchyCog(commands.Cog, name="HierarchyCog"):
             await ctx.send("No staff roles found.")
             return
 
-        buffer, total_staff, vacant_count = await build_hierarchy_image(staff_roles, self.bot.http_session)
+        buffer, total_staff, vacant_count = await build_hierarchy_image(
+            ctx.guild, staff_roles, self.bot.http_session, requested_by=f"Requested by {ctx.author.display_name}"
+        )
 
         file = discord.File(fp=buffer, filename="hierarchy.png")
-        # total_staff/vacant_count were computed but never actually shown
-        # to the user before — surfacing them here as a caption is a real
-        # improvement, not just a cosmetic port.
-        header = (
-            "# 🪪 SERVER HIERARCHY\n"
-            f"-# {len(staff_roles)} tiers • {total_staff} staff • {vacant_count} vacant\n\n"
-            + footer_line("Staff Directory")
-        )
-        await ctx.send(view=SimpleImageLayout(header, file), file=file)
+        # The rendered image already carries its own title, stat pills and
+        # footer (server name, tier/staff/vacant counts, requester, date),
+        # so the message's own text stays to a one-line tag — repeating the
+        # same header/stats as Discord markdown on top of the image would
+        # just be redundant clutter.
+        await ctx.send(view=SimpleImageLayout(footer_line("Staff Directory"), file), file=file)
 
 
 async def setup(bot: commands.Bot):

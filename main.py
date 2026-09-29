@@ -21,6 +21,7 @@ Environment Variables:
 """
 
 import asyncio
+import os
 import signal
 from datetime import datetime, timezone
 from threading import Thread
@@ -29,26 +30,26 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
-from flask import Flask
 
 from core import database
 from core.config import BOT_TOKEN, DEFAULT_PREFIX
 
 EXTENSIONS = ("cogs.growth", "cogs.music", "cogs.hierarchy", "cogs.admin")
 
-# --- Web server to keep the process alive on free-tier hosts ---
-app = Flask('')
 
-
-@app.route('/')
-def home():
-    return "Bot is alive, tracking, and rendering dynamic rating cards!"
-
-
+# --- Web dashboard (also doubles as the process's keep-alive server on
+# free-tier hosts, the way the old placeholder Flask app did) ---
 def run_web_server():
-    import os
+    # Imported lazily, inside the function: by the time this actually runs
+    # (in its own thread, started from keep_alive() below), the module-level
+    # `bot` further down this file already exists, so web.app.create_app(bot)
+    # can bind routes to it. Importing web.app at module load time instead
+    # would work too, but keeping it here makes the dependency — "the web
+    # app needs a constructed bot" — visible at the point it matters.
+    from web.app import create_app
+    app = create_app(bot)
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port, use_reloader=False)
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
 
 
 def keep_alive():
@@ -70,8 +71,19 @@ class BuiiBot(commands.Bot):
         intents.message_content = True
         super().__init__(command_prefix=get_prefix, intents=intents, help_command=None)
         self.http_session: aiohttp.ClientSession = None  # type: ignore
+        self.web_loop: asyncio.AbstractEventLoop = None  # type: ignore  # set in setup_hook()
 
     async def setup_hook(self):
+        # Captured first, before anything else in here: this is the exact
+        # loop discord.py runs the gateway/cog code on, and it's what lets
+        # web/bridge.py safely call into live guild data (bot.guilds,
+        # guild.roles, etc.) from the Flask thread via
+        # asyncio.run_coroutine_threadsafe(). Deliberately not relying on
+        # discord.py's own `self.loop` attribute — this way the dashboard
+        # doesn't depend on an internal implementation detail whose exact
+        # availability timing could differ across discord.py versions.
+        self.web_loop = asyncio.get_running_loop()
+
         # DB pool + tables + the shared HTTP session must exist before any
         # cog's cog_load() runs, since several of them query the DB or
         # register persistent views that reference it.

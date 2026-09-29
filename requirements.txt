@@ -1,6 +1,13 @@
+# >=2.6.0 required for Components V2 (ui.LayoutView, ui.Container,
+# ui.Section, ui.TextDisplay, ui.MediaGallery, ui.Separator) — this project
+# uses those exclusively instead of discord.Embed. Current stable is 2.7.x.
 discord.py>=2.6.0
 psycopg2-binary>=2.9
 flask>=3.0
 matplotlib>=3.8
 aiohttp>=3.9
 Pillow>=10.0
+# Used by web/oauth.py for the dashboard's Discord OAuth2 login — plain
+# synchronous HTTP calls to discord.com, unrelated to the bot's own
+# gateway connection, so no need to route it through asyncio.
+requests>=2.31

@@ -27,6 +27,12 @@ def init_db_pool():
 
 
 def get_db_conn():
+    # Self-initializing: the Flask dashboard thread (web/) can start serving
+    # requests before main.py's setup_hook() has called init_db_pool(), so
+    # whichever caller asks first — the bot or a dashboard request — safely
+    # creates the pool instead of hitting a NoneType crash.
+    if db_pool is None:
+        init_db_pool()
     return db_pool.getconn()
 
 
@@ -37,11 +43,6 @@ def release_db_conn(conn):
 # In-memory prefix cache so async_get_prefix doesn't hit the DB on every
 # message. Populated lazily and kept in sync by async_set_prefix.
 guild_prefix_cache = {}
-
-# Mirrors guild_prefix_cache: avoids a DB round-trip on every
-# has_mod_permission() check, which otherwise makes slash commands
-# time out (10062) when the interaction's 3-second window is tight.
-guild_mod_role_cache: dict[int, int | None] = {}
 
 
 # ==========================================================================
@@ -266,11 +267,7 @@ def _raw_get_mod_role(guild_id):
 
 
 async def async_get_mod_role(guild_id):
-    if guild_id in guild_mod_role_cache:
-        return guild_mod_role_cache[guild_id]
-    result = await asyncio.to_thread(_raw_get_mod_role, guild_id)
-    guild_mod_role_cache[guild_id] = result  # cache None too (means unconfigured)
-    return result
+    return await asyncio.to_thread(_raw_get_mod_role, guild_id)
 
 
 def _raw_set_mod_role(guild_id, role_id):
@@ -290,8 +287,6 @@ def _raw_set_mod_role(guild_id, role_id):
 
 async def async_set_mod_role(guild_id, role_id):
     await asyncio.to_thread(_raw_set_mod_role, guild_id, role_id)
-    # Keep the cache in sync so subsequent checks see the new value immediately.
-    guild_mod_role_cache[guild_id] = int(role_id) if role_id is not None else None
 
 
 def _raw_get_prefix(guild_id):
