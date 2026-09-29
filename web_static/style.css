@@ -4,11 +4,11 @@
    ========================================================= */
 
 :root {
-    --bg: #000000;
-    --surface: #080808;
-    --surface2: #151515;
-    --text: #ffffff;
-    --muted: #888888;
+    --bg: #f4f1ec;
+    --surface: #fffdfa;
+    --surface2: #f0ece5;
+    --text: #171717;
+    --muted: #858078;
     --line: #252525;
     --accent: #ffffff;
     --accent-soft: rgba(255,255,255,.09);
