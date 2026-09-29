@@ -4,15 +4,15 @@
    ========================================================= */
 
 :root {
-    --bg: #f4f1ec;
-    --surface: #fffdfa;
-    --surface2: #f0ece5;
-    --text: #171717;
-    --muted: #858078;
-    --line: #e5dfd7;
-    --accent: #ff5b22;
-    --accent-soft: rgba(255, 91, 34, .10);
-    --ink: #ffffff;
+    --bg: #000000;
+    --surface: #080808;
+    --surface2: #151515;
+    --text: #ffffff;
+    --muted: #888888;
+    --line: #252525;
+    --accent: #ffffff;
+    --accent-soft: rgba(255,255,255,.09);
+    --ink: #000;
 
     --radius: 20px;
     --sidebar-width: 235px;
@@ -101,17 +101,16 @@
     --ink: #102016;
 }
 
-:root[data-theme="amoled"] {
-    --bg: #000000;
-    --surface: #080808;
-    --surface2: #151515;
-    --text: #ffffff;
-    --muted: #888888;
-    --line: #252525;
-    --accent: #ffffff;
-    --accent-soft: rgba(255,255,255,.09);
-    --ink: #000;
-}
+:root[data-theme="paper"] {
+    --bg: #f4f1ec;
+    --surface: #fffdfa;
+    --surface2: #f0ece5;
+    --text: #171717;
+    --muted: #858078;
+    --line: #e5dfd7;
+    --accent: #ff5b22;
+    --accent-soft: rgba(255, 91, 34, .10);
+    --ink: #ffffff;
 
 :root[data-theme="rose"] {
     --bg: #faf0f4;
@@ -2654,4 +2653,3 @@ p {
 .logout a {
   text-decoration: none !important;
 }
-
