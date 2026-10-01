@@ -271,7 +271,7 @@ class HelpView(ui.LayoutView):
         )
 
         return [
-            self._header("🕮 Buii — Help", f"Home · for {name}"),
+            self._header("📖 Buii — Help", f"Home · for {name}"),
             ui.Separator(),
             ui.TextDisplay(greeting),
             self._small_sep(),
@@ -328,11 +328,11 @@ class HelpView(ui.LayoutView):
         in_list = self.mode != "home"
         pages = self._page_count()
 
-        home = ui.Button(label="Home", emoji="🏠︎", style=discord.ButtonStyle.secondary, disabled=not in_list)
-        prev = ui.Button(emoji="◀", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page <= 0))
-        nxt = ui.Button(emoji="◄", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page >= pages - 1))
-        search = ui.Button(label="Search", emoji="🔍︎", style=discord.ButtonStyle.primary)
-        close = ui.Button(label="Close", emoji="✕", style=discord.ButtonStyle.danger)
+        home = ui.Button(label="Home", emoji="🏠", style=discord.ButtonStyle.secondary, disabled=not in_list)
+        prev = ui.Button(emoji="◄", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page <= 0))
+        nxt = ui.Button(emoji="▶", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page >= pages - 1))
+        search = ui.Button(label="Search", emoji="🔍", style=discord.ButtonStyle.primary)
+        close = ui.Button(label="Close", emoji="✖️", style=discord.ButtonStyle.danger)
 
         home.callback = self.on_home
         prev.callback = self.on_prev
