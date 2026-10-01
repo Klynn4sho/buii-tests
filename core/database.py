@@ -150,16 +150,16 @@ def _raw_init_music_db():
             ON songs (guild_id, created_at DESC);
         ''')
         cursor.execute('''
-            CREATE INDEX IF NOT EXISTS ratings_song_id_idx
-            ON ratings (song_id);
-        ''')
-        cursor.execute('''
             CREATE TABLE IF NOT EXISTS ratings (
                 song_id INTEGER NOT NULL REFERENCES songs(id),
                 user_id BIGINT NOT NULL,
                 score INTEGER NOT NULL,
                 PRIMARY KEY (song_id, user_id)
             );
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS ratings_song_id_idx
+            ON ratings (song_id);
         ''')
         conn.commit()
         cursor.close()
@@ -1005,23 +1005,38 @@ def _raw_renumber_songs(guild_id):
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute('''
-            WITH numbered AS (
-                SELECT id, song_number AS old_number,
-                       ROW_NUMBER() OVER (ORDER BY id) AS new_number
-                FROM songs
-                WHERE guild_id = %s
-            )
-            UPDATE songs s
-            SET song_number = numbered.new_number
-            FROM numbered
-            WHERE s.id = numbered.id
-            RETURNING s.id, s.guild_id, s.song_number AS new_number,
-                      numbered.old_number, s.channel_id, s.message_id;
+            CREATE TEMP TABLE song_number_map AS
+            SELECT id, song_number AS old_number,
+                   ROW_NUMBER() OVER (ORDER BY id) AS new_number,
+                   guild_id, channel_id, message_id
+            FROM songs
+            WHERE guild_id = %s;
         ''', (guild_id,))
+        cursor.execute('SELECT COALESCE(MAX(song_number), 0) + 1000000 FROM songs WHERE guild_id = %s;', (guild_id,))
+        offset = cursor.fetchone()[0]
+        cursor.execute('''
+            UPDATE songs s
+            SET song_number = m.new_number + %s
+            FROM song_number_map m
+            WHERE s.id = m.id;
+        ''', (offset,))
+        cursor.execute('''
+            UPDATE songs
+            SET song_number = song_number - %s
+            WHERE guild_id = %s;
+        ''', (offset, guild_id))
+        cursor.execute('''
+            SELECT id, guild_id, old_number, new_number, channel_id, message_id
+            FROM song_number_map ORDER BY new_number;
+        ''')
         rows = cursor.fetchall()
+        cursor.execute('DROP TABLE song_number_map;')
         conn.commit()
         cursor.close()
         return rows
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         release_db_conn(conn)
 
