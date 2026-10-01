@@ -72,7 +72,21 @@ class PreviewButton(ui.Button):
             async with session.get(preview_url) as response:
                 if response.status != 200:
                     raise RuntimeError(f"preview download returned HTTP {response.status}")
+                content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+                if content_type in {"text/html", "application/json", "text/plain"}:
+                    raise RuntimeError(f"preview URL returned {content_type}, not audio")
                 data = await response.content.read(10 * 1024 * 1024 + 1)
+
+            extension = {
+                "audio/mpeg": "mp3",
+                "audio/mp3": "mp3",
+                "audio/mp4": "m4a",
+                "audio/x-m4a": "m4a",
+                "audio/aac": "aac",
+                "audio/ogg": "ogg",
+                "audio/opus": "ogg",
+                "audio/wav": "wav",
+            }.get(content_type, "mp3")
 
             if len(data) > 10 * 1024 * 1024:
                 await interaction.followup.send(
@@ -98,7 +112,7 @@ class PreviewButton(ui.Button):
                 await interaction.message.edit(view=self.view)
 
             await interaction.followup.send(
-                file=discord.File(io.BytesIO(data), filename=f"preview-{self.song_id}.mp3"),
+                file=discord.File(io.BytesIO(data), filename=f"preview-{self.song_id}.{extension}"),
             )
         except Exception as e:
             print(f"[music] preview failed (song {self.song_id}): {e!r}")
