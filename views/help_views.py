@@ -296,7 +296,7 @@ class HelpView(ui.LayoutView):
             empty = "*No commands in this category.*"
         else:
             shown = discord.utils.escape_markdown(self.query[:40])
-            title = "🔍 Search"
+            title = "🔍︎ Search"
             crumb = f"Home › Search “{shown}”{page_label} · {len(entries)} result{'s' if len(entries) != 1 else ''}"
             empty = f"*No commands matched **{shown}**. Try a shorter name.*"
 
@@ -331,8 +331,8 @@ class HelpView(ui.LayoutView):
         home = ui.Button(label="⌂ Home", style=discord.ButtonStyle.secondary, disabled=not in_list)
         prev = ui.Button(label="◀", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page <= 0))
         nxt = ui.Button(label="▶", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page >= pages - 1))
-        search = ui.Button(label="⌕ Search", style=discord.ButtonStyle.primary)
-        close = ui.Button(label="× Close", style=discord.ButtonStyle.danger)
+        search = ui.Button(label="🔍︎ Search", style=discord.ButtonStyle.primary)
+        close = ui.Button(label="✕ Close", style=discord.ButtonStyle.danger)
 
         home.callback = self.on_home
         prev.callback = self.on_prev
