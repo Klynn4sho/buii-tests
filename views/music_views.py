@@ -12,6 +12,7 @@ destructive-action warning.
 """
 
 from datetime import datetime, timezone, timedelta
+import re
 import io
 
 import discord
@@ -112,8 +113,10 @@ class PreviewButton(ui.Button):
             if interaction.message is not None and self.view is not None:
                 await interaction.message.edit(view=self.view)
 
+            safe_title = re.sub(r"[^A-Za-z0-9._-]+", "-", song.get("title") or "preview")
+            safe_title = safe_title.strip("-._")[:60] or "preview"
             await interaction.followup.send(
-                file=discord.File(io.BytesIO(data), filename=f"preview-{self.song_id}.{extension}"),
+                file=discord.File(io.BytesIO(data), filename=f"{safe_title}-{song['song_number']}.{extension}"),
             )
         except Exception as e:
             print(f"[music] preview failed (song {self.song_id}): {e!r}")
