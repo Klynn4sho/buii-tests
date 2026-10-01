@@ -12,6 +12,7 @@ destructive-action warning.
 """
 
 from datetime import datetime, timezone, timedelta
+import io
 
 import discord
 from discord import ui
@@ -39,13 +40,81 @@ def _track_text(title: str, artist: str, preview_url: str = None, url: str = Non
         title_line += f" — {artist}"
     lines.append(title_line)
     link_parts = []
-    if preview_url:
-        link_parts.append(f"[▶️ Preview]({preview_url})")
     if url:
         link_parts.append(f"[🔗 Source]({url})")
     if link_parts:
         lines.append(" • ".join(link_parts))
     return "\n".join(lines)
+
+
+class PreviewButton(ui.Button):
+    def __init__(self, song_id: int):
+        super().__init__(
+            label="▶ Preview",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"preview|{song_id}",
+        )
+        self.song_id = song_id
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            song = await database.get_song(self.song_id)
+            preview_url = song.get("preview_url") if song else None
+            if not preview_url:
+                await interaction.response.send_message(
+                    view=notice("❌ No audio preview is available for this track."),
+                    ephemeral=True,
+                )
+                return
+
+            session = getattr(interaction.client, "http_session", None)
+            if session is None:
+                raise RuntimeError("HTTP session is unavailable")
+
+            async with session.get(preview_url) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"preview download returned HTTP {response.status}")
+                data = await response.content.read(10 * 1024 * 1024 + 1)
+
+            if len(data) > 10 * 1024 * 1024:
+                await interaction.response.send_message(
+                    view=notice("❌ That preview is too large to send."),
+                    ephemeral=True,
+                )
+                return
+            if not data:
+                raise RuntimeError("preview download was empty")
+
+            if not await database.claim_preview(self.song_id):
+                await interaction.response.send_message(
+                    view=notice("⚠️ This preview has already been used."),
+                    ephemeral=True,
+                )
+                return
+
+            self.disabled = True
+            if interaction.message is not None and self.view is not None:
+                await interaction.message.edit(view=self.view)
+
+            await interaction.response.send_message(
+                file=discord.File(io.BytesIO(data), filename=f"preview-{self.song_id}.mp3"),
+                ephemeral=True,
+            )
+        except Exception as e:
+            print(f"[music] preview failed (song {self.song_id}): {e!r}")
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(
+                        view=notice("❌ Couldn't send the audio preview — try again later."),
+                        ephemeral=True,
+                    )
+                else:
+                    await interaction.response.send_message(
+                        view=notice("❌ Couldn't send the audio preview — try again later."),
+                        ephemeral=True,
+                    )
+            except Exception:
+                pass
 
 
 class RatingButton(ui.Button):
@@ -139,6 +208,7 @@ class RatingView(ui.LayoutView):
         if card_file is not None:
             items.append(ui.MediaGallery(discord.MediaGalleryItem(card_file)))
 
+        items.append(ui.ActionRow(PreviewButton(song_id)))
         items.append(ui.ActionRow(*(RatingButton(i, song_id) for i in range(1, 6))))
         items.append(ui.ActionRow(*(RatingButton(i, song_id) for i in range(6, 11))))
 
