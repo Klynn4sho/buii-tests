@@ -248,25 +248,25 @@ class HelpView(ui.LayoutView):
         total = sum(len(v) for v in self.catalog.values())
 
         greeting = (
-            f"**Hey {name} 👋**\n"
+            f"### **Hey {name} 👋**\n"
             f"I'm **Buii** — invite tracking, growth analytics and music ratings in one bot.\n"
             f"Run commands with the prefix `{self.prefix}` or slash `/`."
         )
         how_to = (
-            "**How to use this menu**\n"
-            "📂 **Category menu** below — pick a category to browse its commands\n"
-            "🔍 **Search** button — jump straight to any command by name\n"
-            "🔗 **Link buttons** — dashboard, privacy policy & terms"
+            "### **How to use this menu**\n"
+            "- **Category menu** below — pick a category to browse its commands\n"
+            "- **Search** button — jump straight to any command by name\n"
+            "- **Link buttons** — dashboard, privacy policy & terms"
         )
         browse_lines = [
-            f"{c.emoji} **{c.label}** — {len(self.catalog[c.key])} command"
+            f"- **{c.label}** — {len(self.catalog[c.key])} command"
             f"{'s' if len(self.catalog[c.key]) != 1 else ''} · {c.blurb}"
             for c in self.categories
         ]
-        browse = f"**Browse by category** ({total} commands)\n" + "\n".join(browse_lines)
+        browse = f"### *Browse by category** ({total} commands)\n" + "\n".join(browse_lines)
         setup = (
-            "**Set it up in clicks**\n"
-            f"🌐 **[Open the dashboard]({DASHBOARD_URL})** — configure the bot visually, no commands needed.\n"
+            "### **Set it up in clicks**\n"
+            f"**[Open the dashboard]({DASHBOARD_URL})** — configure the bot visually, no commands needed.\n"
             "-# Join log channel · Alert & mod roles · Prefix · Music channel, role & lock"
         )
 
@@ -280,8 +280,6 @@ class HelpView(ui.LayoutView):
             ui.TextDisplay(browse),
             self._small_sep(),
             ui.TextDisplay(setup),
-            self._small_sep(),
-            ui.TextDisplay(footer_line("Help Directory")),
         ]
 
     def _list_items(self) -> list:
@@ -307,8 +305,6 @@ class HelpView(ui.LayoutView):
             self._header(title, crumb),
             ui.Separator(),
             ui.TextDisplay(body),
-            self._small_sep(),
-            ui.TextDisplay(footer_line("Help Directory")),
         ]
 
     def _category_select(self) -> ui.Select:
@@ -347,7 +343,7 @@ class HelpView(ui.LayoutView):
 
     def _links(self) -> list:
         return [
-            ui.Button(label="Dashboard", emoji="🌐", style=discord.ButtonStyle.link, url=DASHBOARD_URL),
+            ui.Button(label="Dashboard", style=discord.ButtonStyle.link, url=DASHBOARD_URL),
             ui.Button(label="Privacy", style=discord.ButtonStyle.link, url=PRIVACY_URL),
             ui.Button(label="Terms", style=discord.ButtonStyle.link, url=TERMS_URL),
         ]
@@ -361,9 +357,10 @@ class HelpView(ui.LayoutView):
         self.add_item(ui.Container(
             *content,
             ui.Separator(),
+            ui.ActionRow(*self._links()),
+            ui.Separator(),
             ui.ActionRow(select),
             ui.ActionRow(*controls),
-            ui.ActionRow(*self._links()),
         ))
 
     async def _refresh(self, interaction: discord.Interaction):
