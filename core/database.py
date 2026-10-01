@@ -611,22 +611,29 @@ def _raw_add_song(guild_id, channel_id, title, artist, source, url, requester_id
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
+        # Serialize numbering per guild so simultaneous song posts cannot
+        # receive the same public ID.
+        cursor.execute("SELECT pg_advisory_xact_lock(%s);", (int(guild_id),))
+        cursor.execute("SELECT COALESCE(MAX(song_number), 0) + 1 FROM songs WHERE guild_id = %s;", (guild_id,))
+        song_number = cursor.fetchone()[0]
         cursor.execute('''
-            INSERT INTO songs (guild_id, channel_id, message_id, title, artist, source, url, cover_url, preview_url,
+            INSERT INTO songs (guild_id, song_number, channel_id, message_id, title, artist, source, url, cover_url, preview_url,
                                 requested_by_id, requested_by_name, synced, genre)
-            VALUES (%s, %s, 0, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s)
-            RETURNING id;
-        ''', (guild_id, channel_id, title, artist, source, url, cover_url, preview_url, requester_id, requester_name, genre))
-        song_id = cursor.fetchone()[0]
+            VALUES (%s, %s, %s, 0, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s)
+            RETURNING id, song_number;
+        ''', (guild_id, song_number, channel_id, title, artist, source, url, cover_url, preview_url,
+              requester_id, requester_name, genre))
+        row = cursor.fetchone()
         conn.commit()
         cursor.close()
-        return song_id
+        return {"id": row[0], "song_number": row[1]}
     finally:
         release_db_conn(conn)
 
 
-async def add_song(guild_id, channel_id, title, artist, source, url, requester_id, requester_name, cover_url=None, preview_url=None, genre=None) -> int:
-    return await asyncio.to_thread(_raw_add_song, guild_id, channel_id, title, artist, source, url, requester_id, requester_name, cover_url, preview_url, genre)
+async def add_song(guild_id, channel_id, title, artist, source, url, requester_id, requester_name, cover_url=None, preview_url=None, genre=None):
+    return await asyncio.to_thread(_raw_add_song, guild_id, channel_id, title, artist, source, url,
+                                   requester_id, requester_name, cover_url, preview_url, genre)
 
 
 def _raw_set_song_genre(song_id, genre):
@@ -681,44 +688,52 @@ async def find_duplicate_song(guild_id: int, url: str, title: str, artist: str):
     return await asyncio.to_thread(_raw_find_duplicate_song, guild_id, url, title, artist)
 
 
-def _raw_set_song_message_id(song_id, message_id):
+def _raw_set_song_message_id(guild_id, song_id, message_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
-        cursor.execute('UPDATE songs SET message_id = %s WHERE id = %s;', (message_id, song_id))
+        cursor.execute('UPDATE songs SET message_id = %s WHERE guild_id = %s AND id = %s;', (message_id, guild_id, song_id))
         conn.commit()
         cursor.close()
     finally:
         release_db_conn(conn)
 
 
-async def set_song_message_id(song_id: int, message_id: int):
-    await asyncio.to_thread(_raw_set_song_message_id, song_id, message_id)
+async def set_song_message_id(guild_id: int, song_id: int, message_id: int):
+    await asyncio.to_thread(_raw_set_song_message_id, guild_id, song_id, message_id)
 
 
-def _raw_set_rating(song_id, user_id, score):
+
+def _raw_set_rating(guild_id, song_id, user_id, score):
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO ratings (song_id, user_id, score) VALUES (%s, %s, %s)
+            INSERT INTO ratings (song_id, user_id, score)
+            SELECT id, %s, %s FROM songs
+            WHERE guild_id = %s AND id = %s
             ON CONFLICT (song_id, user_id) DO UPDATE SET score = EXCLUDED.score;
-        ''', (song_id, user_id, score))
+        ''', (user_id, score, guild_id, song_id))
         conn.commit()
         cursor.close()
     finally:
         release_db_conn(conn)
 
 
-async def set_rating(song_id: int, user_id: int, score: int):
-    await asyncio.to_thread(_raw_set_rating, song_id, user_id, score)
+async def set_rating(guild_id: int, song_id: int, user_id: int, score: int):
+    await asyncio.to_thread(_raw_set_rating, guild_id, song_id, user_id, score)
 
 
-def _raw_get_song_stats(song_id):
+
+def _raw_get_song_stats(guild_id, song_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
-        cursor.execute('SELECT AVG(score), COUNT(*) FROM ratings WHERE song_id = %s;', (song_id,))
+        cursor.execute('''
+            SELECT AVG(r.score), COUNT(r.score)
+            FROM ratings r JOIN songs s ON s.id = r.song_id
+            WHERE s.guild_id = %s AND s.id = %s;
+        ''', (guild_id, song_id))
         row = cursor.fetchone()
         cursor.close()
         return (float(row[0]) if row[0] is not None else 0.0), (row[1] or 0)
@@ -726,15 +741,20 @@ def _raw_get_song_stats(song_id):
         release_db_conn(conn)
 
 
-async def get_song_stats(song_id: int):
-    return await asyncio.to_thread(_raw_get_song_stats, song_id)
+async def get_song_stats(guild_id: int, song_id: int):
+    return await asyncio.to_thread(_raw_get_song_stats, guild_id, song_id)
 
 
-def _raw_get_song_ratings_breakdown(song_id):
+
+def _raw_get_song_ratings_breakdown(guild_id, song_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute('SELECT user_id, score FROM ratings WHERE song_id = %s;', (song_id,))
+        cursor.execute('''
+            SELECT r.user_id, r.score
+            FROM ratings r JOIN songs s ON s.id = r.song_id
+            WHERE s.guild_id = %s AND s.id = %s;
+        ''', (guild_id, song_id))
         rows = cursor.fetchall()
         cursor.close()
         return rows
@@ -742,8 +762,9 @@ def _raw_get_song_ratings_breakdown(song_id):
         release_db_conn(conn)
 
 
-async def get_song_ratings_breakdown(song_id: int):
-    return await asyncio.to_thread(_raw_get_song_ratings_breakdown, song_id)
+async def get_song_ratings_breakdown(guild_id: int, song_id: int):
+    return await asyncio.to_thread(_raw_get_song_ratings_breakdown, guild_id, song_id)
+
 
 
 def _raw_get_user_stats(guild_id, user_id):
@@ -774,11 +795,11 @@ async def get_user_stats(guild_id: int, user_id: int):
     return await asyncio.to_thread(_raw_get_user_stats, guild_id, user_id)
 
 
-def _raw_get_song(song_id):
+def _raw_get_song(guild_id, song_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute('SELECT * FROM songs WHERE id = %s;', (song_id,))
+        cursor.execute('SELECT * FROM songs WHERE guild_id = %s AND id = %s;', (guild_id, song_id))
         row = cursor.fetchone()
         cursor.close()
         return row
@@ -786,20 +807,37 @@ def _raw_get_song(song_id):
         release_db_conn(conn)
 
 
-async def get_song(song_id: int):
-    return await asyncio.to_thread(_raw_get_song, song_id)
+async def get_song(guild_id: int, song_id: int):
+    return await asyncio.to_thread(_raw_get_song, guild_id, song_id)
 
 
-def _raw_claim_preview(song_id):
+def _raw_get_song_by_number(guild_id, song_number):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute('SELECT * FROM songs WHERE guild_id = %s AND song_number = %s;', (guild_id, song_number))
+        row = cursor.fetchone()
+        cursor.close()
+        return row
+    finally:
+        release_db_conn(conn)
+
+
+async def get_song_by_number(guild_id: int, song_number: int):
+    return await asyncio.to_thread(_raw_get_song_by_number, guild_id, song_number)
+
+
+
+def _raw_claim_preview(guild_id, song_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
         cursor.execute('''
             UPDATE songs
             SET preview_used = 1
-            WHERE id = %s AND COALESCE(preview_used, 0) = 0
+            WHERE guild_id = %s AND id = %s AND COALESCE(preview_used, 0) = 0
             RETURNING id;
-        ''', (song_id,))
+        ''', (guild_id, song_id))
         claimed = cursor.fetchone() is not None
         conn.commit()
         cursor.close()
@@ -808,15 +846,19 @@ def _raw_claim_preview(song_id):
         release_db_conn(conn)
 
 
-async def claim_preview(song_id: int) -> bool:
-    return await asyncio.to_thread(_raw_claim_preview, song_id)
+async def claim_preview(guild_id: int, song_id: int) -> bool:
+    return await asyncio.to_thread(_raw_claim_preview, guild_id, song_id)
+
 
 
 def _raw_get_recent_songs(limit):
     conn = get_db_conn()
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute('SELECT id, preview_used, url FROM songs ORDER BY id DESC LIMIT %s;', (limit,))
+        cursor.execute('''
+            SELECT id, guild_id, song_number, preview_used, url
+            FROM songs ORDER BY id DESC LIMIT %s;
+        ''', (limit,))
         rows = cursor.fetchall()
         cursor.close()
         return rows
@@ -826,6 +868,7 @@ def _raw_get_recent_songs(limit):
 
 async def get_recent_songs(limit: int = 500):
     return await asyncio.to_thread(_raw_get_recent_songs, limit)
+
 
 
 def _raw_get_music_leaderboard(guild_id, limit, min_votes, min_score=0.0):
@@ -850,56 +893,62 @@ async def get_music_leaderboard(guild_id: int, limit: int = 10, min_votes: int =
     return await asyncio.to_thread(_raw_get_music_leaderboard, guild_id, limit, min_votes, min_score)
 
 
-def _raw_mark_song_synced(song_id):
+def _raw_mark_song_synced(guild_id, song_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
-        cursor.execute('UPDATE songs SET synced = 1 WHERE id = %s;', (song_id,))
+        cursor.execute('UPDATE songs SET synced = 1 WHERE guild_id = %s AND id = %s;', (guild_id, song_id))
         conn.commit()
         cursor.close()
     finally:
         release_db_conn(conn)
 
 
-async def mark_song_synced(song_id: int):
-    await asyncio.to_thread(_raw_mark_song_synced, song_id)
+async def mark_song_synced(guild_id: int, song_id: int):
+    await asyncio.to_thread(_raw_mark_song_synced, guild_id, song_id)
 
 
-def _raw_unmark_song_synced(song_id):
+
+def _raw_unmark_song_synced(guild_id, song_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
-        cursor.execute('UPDATE songs SET synced = 0 WHERE id = %s;', (song_id,))
+        cursor.execute('UPDATE songs SET synced = 0 WHERE guild_id = %s AND id = %s;', (guild_id, song_id))
         conn.commit()
         cursor.close()
     finally:
         release_db_conn(conn)
 
 
-async def unmark_song_synced(song_id: int):
-    await asyncio.to_thread(_raw_unmark_song_synced, song_id)
+async def unmark_song_synced(guild_id: int, song_id: int):
+    await asyncio.to_thread(_raw_unmark_song_synced, guild_id, song_id)
 
 
-def _raw_close_song(song_id):
+
+def _raw_close_song(guild_id, song_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
-        cursor.execute('UPDATE songs SET closed = 1 WHERE id = %s;', (song_id,))
+        cursor.execute('UPDATE songs SET closed = 1 WHERE guild_id = %s AND id = %s;', (guild_id, song_id))
         conn.commit()
         cursor.close()
     finally:
         release_db_conn(conn)
 
 
-async def close_song(song_id: int):
-    await asyncio.to_thread(_raw_close_song, song_id)
+async def close_song(guild_id: int, song_id: int):
+    await asyncio.to_thread(_raw_close_song, guild_id, song_id)
 
 
-def _raw_get_user_vote(song_id, user_id):
+
+def _raw_get_user_vote(guild_id, song_id, user_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
-        cursor.execute('SELECT score FROM ratings WHERE song_id = %s AND user_id = %s;', (song_id, user_id))
+        cursor.execute('''
+            SELECT r.score FROM ratings r JOIN songs s ON s.id = r.song_id
+            WHERE s.guild_id = %s AND s.id = %s AND r.user_id = %s;
+        ''', (guild_id, song_id, user_id))
         row = cursor.fetchone()
         cursor.close()
         return row[0] if row else None
@@ -907,24 +956,29 @@ def _raw_get_user_vote(song_id, user_id):
         release_db_conn(conn)
 
 
-async def get_user_vote(song_id: int, user_id: int):
-    return await asyncio.to_thread(_raw_get_user_vote, song_id, user_id)
+async def get_user_vote(guild_id: int, song_id: int, user_id: int):
+    return await asyncio.to_thread(_raw_get_user_vote, guild_id, song_id, user_id)
 
 
-def _raw_delete_song(song_id):
+
+def _raw_delete_song(guild_id, song_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM ratings WHERE song_id = %s;', (song_id,))
-        cursor.execute('DELETE FROM songs WHERE id = %s;', (song_id,))
+        cursor.execute('''
+            DELETE FROM ratings
+            WHERE song_id = (SELECT id FROM songs WHERE guild_id = %s AND id = %s);
+        ''', (guild_id, song_id))
+        cursor.execute('DELETE FROM songs WHERE guild_id = %s AND id = %s;', (guild_id, song_id))
         conn.commit()
         cursor.close()
     finally:
         release_db_conn(conn)
 
 
-async def delete_song(song_id: int):
-    await asyncio.to_thread(_raw_delete_song, song_id)
+async def delete_song(guild_id: int, song_id: int):
+    await asyncio.to_thread(_raw_delete_song, guild_id, song_id)
+
 
 
 def _raw_get_expired_open_songs():
@@ -946,66 +1000,31 @@ async def get_expired_open_songs():
     return await asyncio.to_thread(_raw_get_expired_open_songs)
 
 
-def _raw_renumber_songs():
-    """Reassigns songs.id to a dense 1..N sequence (ordered by the old id,
-    i.e. chronological), cascades the new ids into ratings.song_id, and
-    resets the songs_id_seq so future inserts continue from the new max.
-
-    Uses a temporary large offset so the UPDATE can't collide with itself
-    mid-statement (Postgres checks uniqueness per-row during a multi-row
-    UPDATE, so swapping ids directly into their final 1..N values would
-    trip over rows that haven't been updated yet). Shifting everything into
-    a guaranteed-unused high range first, then back down, avoids that.
-    """
+def _raw_renumber_songs(guild_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-
-        cursor.execute('ALTER TABLE ratings DROP CONSTRAINT IF EXISTS ratings_song_id_fkey;')
-
-        cursor.execute('DROP TABLE IF EXISTS id_map;')
         cursor.execute('''
-            CREATE TEMP TABLE id_map AS
-            SELECT id AS old_id,
-                   ROW_NUMBER() OVER (ORDER BY id) AS new_id,
-                   guild_id, channel_id, message_id
-            FROM songs;
-        ''')
-
-        cursor.execute('SELECT COALESCE(MAX(id), 0) AS max_id FROM songs;')
-        offset = cursor.fetchone()['max_id'] + 1_000_000
-
-        cursor.execute('''
-            UPDATE ratings r SET song_id = m.new_id + %s
-            FROM id_map m WHERE r.song_id = m.old_id;
-        ''', (offset,))
-        cursor.execute('''
-            UPDATE songs s SET id = m.new_id + %s
-            FROM id_map m WHERE s.id = m.old_id;
-        ''', (offset,))
-
-        cursor.execute('UPDATE songs SET id = id - %s;', (offset,))
-        cursor.execute('UPDATE ratings SET song_id = song_id - %s;', (offset,))
-
-        cursor.execute("SELECT setval('songs_id_seq', (SELECT MAX(id) FROM songs));")
-        cursor.execute('''
-            ALTER TABLE ratings
-            ADD CONSTRAINT ratings_song_id_fkey FOREIGN KEY (song_id) REFERENCES songs(id);
-        ''')
-
-        cursor.execute('SELECT old_id, new_id, guild_id, channel_id, message_id FROM id_map ORDER BY new_id;')
-        mapping = cursor.fetchall()
-
-        cursor.execute('DROP TABLE id_map;')
+            WITH numbered AS (
+                SELECT id, song_number AS old_number,
+                       ROW_NUMBER() OVER (ORDER BY id) AS new_number
+                FROM songs
+                WHERE guild_id = %s
+            )
+            UPDATE songs s
+            SET song_number = numbered.new_number
+            FROM numbered
+            WHERE s.id = numbered.id
+            RETURNING s.id, s.guild_id, s.song_number AS new_number,
+                      numbered.old_number, s.channel_id, s.message_id;
+        ''', (guild_id,))
+        rows = cursor.fetchall()
         conn.commit()
         cursor.close()
-        return mapping
-    except Exception:
-        conn.rollback()
-        raise
+        return rows
     finally:
         release_db_conn(conn)
 
 
-async def renumber_songs():
-    return await asyncio.to_thread(_raw_renumber_songs)
+async def renumber_songs(guild_id: int):
+    return await asyncio.to_thread(_raw_renumber_songs, guild_id)
