@@ -51,7 +51,7 @@ class JoinValueButton(ui.DynamicItem[ui.Button], template=r"join_value\|(?P<kind
 
 class JoinAlertView(ui.LayoutView):
     """Invite alert image plus private copyable-value responses."""
-    def __init__(self, card_file, ping_text, user_id, inviter_id, invite_code, accent, member_id):
+    def __init__(self, card_file, ping_text, info_text, user_id, inviter_id, invite_code, accent, member_id):
         super().__init__(timeout=None)
         self.file = card_file
 
@@ -74,6 +74,7 @@ class JoinAlertView(ui.LayoutView):
         ]
         self.container = ui.Container(
             ui.TextDisplay(ping_text),
+            ui.TextDisplay(info_text),
             ui.MediaGallery(discord.MediaGalleryItem(card_file)),
             ui.ActionRow(*buttons),
             accent_color=accent,
