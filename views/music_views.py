@@ -75,7 +75,7 @@ class PreviewButton(ui.Button):
                 content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
                 if content_type in {"text/html", "application/json", "text/plain"}:
                     raise RuntimeError(f"preview URL returned {content_type}, not audio")
-                data = await response.content.read(10 * 1024 * 1024 + 1)
+                data = await response.read()
 
             extension = {
                 "audio/mpeg": "mp3",
