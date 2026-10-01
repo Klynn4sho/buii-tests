@@ -7,10 +7,26 @@ env vars the bot needs.
 """
 
 import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 import discord
 
 # --- Environment ---
-DB_CONNECTION_STRING = os.environ.get("DB_URL")
+def _build_db_connection_string(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    # Supabase requires TLS in production. Keep any user-supplied options,
+    # while adding safe defaults for SSL and slow/dead connection attempts.
+    if "://" not in raw:
+        return raw
+    parts = urlsplit(raw)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.setdefault("sslmode", "require")
+    query.setdefault("connect_timeout", "10")
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+DB_CONNECTION_STRING = _build_db_connection_string(os.environ.get("DB_URL"))
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 _bypass_raw = os.environ.get("BYPASS_USER_ID")
