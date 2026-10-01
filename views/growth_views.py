@@ -15,7 +15,7 @@ from discord import ui
 
 from core import database
 from core.config import BYPASS_USER_ID, COLOR_BRAND
-from core.components import footer_line, notice
+from core.components import SimpleLayout, footer_line, notice
 from core.helpers import build_dashboard_content_items, build_joins_graph_async
 
 
@@ -44,14 +44,19 @@ class JoinValueButton(ui.DynamicItem[ui.Button], template=r"join_value\|(?P<kind
     async def callback(self, interaction):
         labels = {"user": "User ID", "inviter": "Inviter ID", "code": "Invite Code"}
         await interaction.response.send_message(
-            content=f"{labels[self.kind]}: {self.value}",
+            view=SimpleLayout(
+                f"### {labels[self.kind]}\\n\\n**Value:** {self.value}"
+            ),
             ephemeral=True,
         )
 
 
+class JoinAlertView
+
+
 class JoinAlertView(ui.LayoutView):
     """Invite alert image plus private copyable-value responses."""
-    def __init__(self, card_file, ping_text, info_text, user_id, inviter_id, invite_code, accent, member_id):
+    def __init__(self, card_file, ping_text, user_id, inviter_id, invite_code, accent, member_id):
         super().__init__(timeout=None)
         self.file = card_file
 
@@ -60,7 +65,9 @@ class JoinAlertView(ui.LayoutView):
 
             async def callback(interaction):
                 await interaction.response.send_message(
-                    content=f"{label}: {value}",
+                    view=SimpleLayout(
+                        f"### {label}\n\n**Value:** {value}"
+                    ),
                     ephemeral=True,
                 )
 
@@ -74,7 +81,6 @@ class JoinAlertView(ui.LayoutView):
         ]
         self.container = ui.Container(
             ui.TextDisplay(ping_text),
-            ui.TextDisplay(info_text),
             ui.MediaGallery(discord.MediaGalleryItem(card_file)),
             ui.ActionRow(*buttons),
             accent_color=accent,
