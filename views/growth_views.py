@@ -80,7 +80,6 @@ class JoinAlertView(ui.LayoutView):
             ui.TextDisplay(ping_text),
             ui.MediaGallery(discord.MediaGalleryItem(card_file)),
             ui.ActionRow(*buttons),
-            accent_color=accent,
         )
         self.add_item(self.container)
 
