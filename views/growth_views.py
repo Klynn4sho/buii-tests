@@ -42,7 +42,7 @@ class JoinAlertView(ui.LayoutView):
 
             async def callback(interaction):
                 await interaction.response.send_message(
-                    view=SimpleLayout(f"**{label}**\n{value}"),
+                    content=f"{label}: {value}",
                     ephemeral=True,
                 )
 
