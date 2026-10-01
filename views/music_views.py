@@ -21,7 +21,7 @@ from discord import ui
 from core import database
 from core.config import RATING_WINDOW_HOURS, COLOR_DANGER
 from core.components import footer_line, notice
-from core.helpers import create_music_card, score_color
+from core.helpers import create_music_card, score_color, format_elapsed
 from core.music_utils import sync_to_spotify, remove_from_spotify
 
 
@@ -247,40 +247,119 @@ class RatingView(ui.LayoutView):
         self.add_item(self.container)
 
 
-class ClosedRatingView(ui.LayoutView):
-    """Read-only replica of RatingView with every button disabled — swapped
-    in once a song's rating window elapses (or an admin manually closes it
-    via /closevoting) so the buttons visibly grey out instead of silently
-    rejecting clicks. Reuses the message's *existing* attachment via the
-    `attachment://<filename>` reference instead of re-uploading the card
-    image — the file is already on the message, so no new upload or
-    re-render is needed just to disable the buttons."""
-    def __init__(self, song: dict, avg: float, count: int):
-        super().__init__(timeout=None)
+class SongSearchModal(ui.Modal, title="Search songs"):
+    query = ui.TextInput(
+        label="Song title or artist",
+        placeholder="Type part of a title or artist...",
+        max_length=100,
+        required=True,
+    )
 
-        items = [ui.TextDisplay(_track_text(song.get("title"), song.get("artist"),
-                                             song.get("preview_url"), song.get("url")))]
-        items.append(ui.MediaGallery(discord.MediaGalleryItem("attachment://rating_card.png")))
+    def __init__(self, leaderboard):
+        super().__init__()
+        self.leaderboard = leaderboard
 
-        if song.get("url"):
-            items.append(ui.ActionRow(
-                ui.Button(label="↗ Source", style=discord.ButtonStyle.link, url=song["url"])
-            ))
+    async def on_submit(self, interaction: discord.Interaction):
+        rows = await database.search_songs(
+            self.leaderboard.guild_id,
+            str(self.query),
+            limit=25,
+            min_votes=2,
+            min_score=self.leaderboard.min_score,
+        )
+        if not rows:
+            await interaction.response.send_message(
+                view=notice("🔎 No songs matched that search. Results still require at least 2 votes."),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            view=SongLeaderboardView(
+                self.leaderboard.guild_id,
+                rows,
+                min_score=self.leaderboard.min_score,
+                query=str(self.query),
+            ),
+            ephemeral=True,
+        )
 
-        for row_range in (range(1, 6), range(6, 11)):
-            items.append(ui.ActionRow(*(
-                ui.Button(label=str(i), style=discord.ButtonStyle.secondary, disabled=True,
-                          custom_id=f"closed_rating|{song['id']}|{i}")
-                for i in row_range
-            )))
 
-        items.append(ui.TextDisplay(footer_line(
-            f"ID: {song['song_number']} • 🔒 Voting closed after {RATING_WINDOW_HOURS} hours • Final: {avg:.1f}/10 ({count} votes)"
-        )))
+class SongLeaderboardView(ui.LayoutView):
+    def __init__(self, guild_id: int, rows: list[dict], *, min_score: float = 0.0, query: str = None):
+        super().__init__(timeout=900)
+        self.guild_id = guild_id
+        self.rows = rows[:25]
+        self.min_score = min_score
+        self.query = query
+        self.select = ui.Select(
+            placeholder="Choose a song for details",
+            options=[
+                discord.SelectOption(
+                    label=(row["title"] or "Unknown Title")[:100],
+                    value=str(row["song_number"]),
+                    description=f"ID `{row['song_number']}` · {float(row['avg_score']):.1f}/10 · {row['votes']} votes"[:100],
+                )
+                for row in self.rows
+            ],
+        )
+        self.select.callback = self.on_song_selected
 
-        color = discord.Color.from_str(score_color(avg)) if count > 0 else discord.Color.dark_grey()
-        self.container = ui.Container(*items, accent_color=color)
+        search_button = ui.Button(label="Search songs", style=discord.ButtonStyle.secondary)
+        search_button.callback = self.on_search
+        self.container = ui.Container(
+            ui.TextDisplay(self._render_text()),
+            ui.ActionRow(self.select, search_button),
+        )
         self.add_item(self.container)
+
+    def _render_text(self, selected: dict = None) -> str:
+        title = "🏆 Top Rated Songs" if not self.query else f"🔎 Search Results: {self.query}"
+        if self.min_score:
+            title += f" (≥ {self.min_score:.1f}/10)"
+        lines = [f"## {title}", "-# Ranked songs require at least 2 votes.", ""]
+        if selected:
+            artist = f" — {selected['artist']}" if selected.get("artist") else ""
+            lines.extend([
+                f"### {selected['title'] or 'Unknown Title'}{artist}",
+                f"**Server Song ID:** `{selected['song_number']}`",
+                f"**Rating:** ⭐ **{float(selected['avg_score']):.1f}/10** · **{selected['votes']} votes**",
+                f"**Posted:** {format_elapsed(selected['created_at'])}",
+                "",
+            ])
+        for index, row in enumerate(self.rows, start=1):
+            medal = ["🥇", "🥈", "🥉"][index - 1] if index <= 3 else f"**{index}.**"
+            artist = f" — {row['artist']}" if row.get("artist") else ""
+            lines.append(
+                f"{medal} **{row['title'] or 'Unknown Title'}**{artist} · "
+                f"ID `{row['song_number']}` · ⭐ **{float(row['avg_score']):.1f}/10** · "
+                f"{row['votes']} votes"
+            )
+        lines.extend(["", footer_line("Server Music Leaderboard")])
+        return "\n".join(lines)
+
+    async def on_song_selected(self, interaction: discord.Interaction):
+        number = int(self.select.values[0])
+        selected = await database.get_song_by_number(self.guild_id, number)
+        if not selected:
+            await interaction.response.send_message(view=notice("❌ That song is no longer available."), ephemeral=True)
+            return
+        avg, count = await database.get_song_stats(self.guild_id, selected["id"])
+        selected["avg_score"] = avg
+        selected["votes"] = count
+        self.container.children[0].content = self._render_text(selected)
+        await interaction.response.edit_message(view=self)
+
+    async def on_search(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(SongSearchModal(self))
+
+
+class ClosedRatingView(ui.LayoutView):
+    """Locked songs keep only their Pillow card; all controls are removed."""
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(ui.MediaGallery(
+            discord.MediaGalleryItem("attachment://rating_card.png")
+        ))
 
 
 class RenumberConfirmView(ui.LayoutView):
