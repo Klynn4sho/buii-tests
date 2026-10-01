@@ -893,6 +893,34 @@ async def get_music_leaderboard(guild_id: int, limit: int = 10, min_votes: int =
     return await asyncio.to_thread(_raw_get_music_leaderboard, guild_id, limit, min_votes, min_score)
 
 
+def _raw_search_songs(guild_id, query, limit, min_votes, min_score):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        pattern = "%" + query.strip() + "%"
+        cursor.execute('''
+            SELECT s.id, s.song_number, s.title, s.artist, s.created_at,
+                   AVG(r.score) AS avg_score, COUNT(r.score) AS votes
+            FROM songs s JOIN ratings r ON s.id = r.song_id
+            WHERE s.guild_id = %s
+              AND (s.title ILIKE %s OR COALESCE(s.artist, '') ILIKE %s)
+            GROUP BY s.id
+            HAVING COUNT(r.score) >= %s AND AVG(r.score) >= %s
+            ORDER BY avg_score DESC, votes DESC, s.id DESC
+            LIMIT %s;
+        ''', (guild_id, pattern, pattern, min_votes, min_score, limit))
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    finally:
+        release_db_conn(conn)
+
+
+async def search_songs(guild_id: int, query: str, limit: int = 25,
+                       min_votes: int = 2, min_score: float = 0.0):
+    return await asyncio.to_thread(_raw_search_songs, guild_id, query, limit, min_votes, min_score)
+
+
 def _raw_mark_song_synced(guild_id, song_id):
     conn = get_db_conn()
     try:
