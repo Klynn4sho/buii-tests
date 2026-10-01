@@ -89,7 +89,22 @@ async def fetch_song_metadata(session: aiohttp.ClientSession, source: str, url: 
                     elif source in ("YouTube", "YouTube Music") and artist:
                         artist = YOUTUBE_CHANNEL_SUFFIX_RE.sub('', artist).strip() or artist
                     return title, artist, thumbnail, None
-        else:
+        elif source == "Deezer":
+            match = re.search(r"/track/(\\d+)", url)
+            if match:
+                endpoint = f"https://api.deezer.com/track/{match.group(1)}"
+                async with session.get(endpoint, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        artist_data = data.get("artist") or {}
+                        album_data = data.get("album") or {}
+                        return (
+                            data.get("title"),
+                            artist_data.get("name"),
+                            album_data.get("cover_big") or album_data.get("cover"),
+                            data.get("preview"),
+                        )
+
             headers = {"User-Agent": "Mozilla/5.0 (compatible; MusicRatingBot/1.0)"}
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=8), headers=headers) as resp:
                 if resp.status == 200:
