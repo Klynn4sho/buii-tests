@@ -31,6 +31,24 @@ async def _notify_error(interaction: discord.Interaction, text: str):
         pass
 
 
+class JoinValueButton(ui.DynamicItem[ui.Button], template=r"join_value\\|(?P<kind>user|inviter|code)\\|(?P<value>[A-Za-z0-9_-]+)"):
+    def __init__(self, item, kind, value):
+        super().__init__(item)
+        self.kind = kind
+        self.value = value
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(item, match.group("kind"), match.group("value"))
+
+    async def callback(self, interaction):
+        labels = {"user": "User ID", "inviter": "Inviter ID", "code": "Invite Code"}
+        await interaction.response.send_message(
+            content=f"{labels[self.kind]}: {self.value}",
+            ephemeral=True,
+        )
+
+
 class JoinAlertView(ui.LayoutView):
     """Invite alert image plus private copyable-value responses."""
     def __init__(self, card_file, ping_text, user_id, inviter_id, invite_code, accent, member_id):
@@ -38,7 +56,7 @@ class JoinAlertView(ui.LayoutView):
         self.file = card_file
 
         def value_button(label, value, suffix):
-            button = ui.Button(label=label, style=discord.ButtonStyle.secondary, custom_id=f"join_value|{member_id}|{suffix}")
+            button = ui.Button(label=label, style=discord.ButtonStyle.secondary, custom_id=f"join_value|{suffix}|{value}")
 
             async def callback(interaction):
                 await interaction.response.send_message(
