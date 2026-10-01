@@ -42,7 +42,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             # RatingView here with no title/card_file (both default to
             # placeholders) is safe: the already-posted message on Discord's
             # side is untouched, this just re-wires the click handlers.
-            self.bot.add_view(RatingView(row["id"]))
+            self.bot.add_view(RatingView(row["id"], preview_used=bool(row["preview_used"])))
 
     def cog_unload(self):
         self.expiry_sweep_loop.cancel()
@@ -447,6 +447,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
                         # id, not touching the image, so nothing needs
                         # re-rendering or re-uploading here.
                         card_file="attachment://rating_card.png",
+                        preview_used=bool(song.get("preview_used")),
                     )
                     await message.edit(view=new_view)
                 repaired += 1
