@@ -119,6 +119,7 @@ def _raw_init_music_db():
         ''')
         cursor.execute('ALTER TABLE songs ADD COLUMN IF NOT EXISTS genre TEXT;')
         cursor.execute('ALTER TABLE songs ADD COLUMN IF NOT EXISTS closed INTEGER DEFAULT 0;')
+        cursor.execute('ALTER TABLE songs ADD COLUMN IF NOT EXISTS preview_used INTEGER DEFAULT 0;')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS ratings (
                 song_id INTEGER NOT NULL REFERENCES songs(id),
@@ -754,6 +755,28 @@ def _raw_get_song(song_id):
 
 async def get_song(song_id: int):
     return await asyncio.to_thread(_raw_get_song, song_id)
+
+
+def _raw_claim_preview(song_id):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE songs
+            SET preview_used = 1
+            WHERE id = %s AND COALESCE(preview_used, 0) = 0
+            RETURNING id;
+        ''', (song_id,))
+        claimed = cursor.fetchone() is not None
+        conn.commit()
+        cursor.close()
+        return claimed
+    finally:
+        release_db_conn(conn)
+
+
+async def claim_preview(song_id: int) -> bool:
+    return await asyncio.to_thread(_raw_claim_preview, song_id)
 
 
 def _raw_get_recent_songs(limit):
