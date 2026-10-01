@@ -166,7 +166,7 @@ async def create_join_card(
     account_age_days: int, risk_status: str, member_count: int, accent_rgb: tuple,
 ):
     """Render a compact invite alert image with all raw details."""
-    W, H = 1100, 620
+    W, H = 1100, 660
     bg, panel = "#111214", "#1E2024"
     muted, white = "#A7ADB7", "#F2F3F5"
     accent = _rgb_to_hex(accent_rgb)
@@ -222,13 +222,27 @@ async def create_join_card(
     ])
 
     risk_y = 470
-    draw.rounded_rectangle([52, risk_y, W - 52, risk_y + 92], radius=16, fill="#16181B", outline=accent, width=2)
+    draw.rounded_rectangle([52, risk_y, W - 52, risk_y + 138], radius=16, fill="#16181B", outline=accent, width=2)
     draw.text((76, risk_y + 16), "SECURITY", fill=accent, font=get_font(18, bold=True))
-    draw.text((76, risk_y + 48), risk_status, fill=white, font=get_font(22, bold=True))
-    age_text = f"Account age: {account_age_days}d   •   Server members: {member_count}"
+
+    risk_label = (
+        risk_status.replace("🚨 ", "").replace("⚠️ ", "").replace("🟢 ", "")
+    )
+    draw.text((76, risk_y + 48), risk_label, fill=white, font=get_font(22, bold=True))
+
+    bar_x, bar_y = 76, risk_y + 92
+    bar_w, bar_h = W - 152, 14
+    draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h],
+                           radius=bar_h // 2, fill="#2B2D31")
+    progress = max(0.0, min(account_age_days / 30.0, 1.0))
+    fill_w = max(bar_h, int(bar_w * progress)) if progress > 0 else 0
+    if fill_w:
+        draw.rounded_rectangle([bar_x, bar_y, bar_x + fill_w, bar_y + bar_h],
+                               radius=bar_h // 2, fill=accent)
+
+    age_text = f"Account age: {account_age_days}d / 30d+   •   Server members: {member_count}"
     age_font = get_font(19)
-    age_w = draw.textlength(age_text, font=age_font)
-    draw.text((W - 76 - age_w, risk_y + 50), age_text, fill=muted, font=age_font)
+    draw.text((76, risk_y + 112), age_text, fill=muted, font=age_font)
 
     buf = io.BytesIO()
     card.save(buf, format="PNG", optimize=True)
