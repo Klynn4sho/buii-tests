@@ -191,7 +191,7 @@ class RatingButton(ui.Button):
                     sync_alert = "\n⚠️ *Track dropped below 6.0 average and was removed from the server Spotify playlist.*"
 
         card_bytes, dominant_rgb = await create_music_card(bot.http_session, song["title"], song["artist"], song["cover_url"],
-                                                             avg, count, genre=song["genre"])
+                                                             avg, count, genre=song["genre"], song_number=song["song_number"])
         new_file = discord.File(fp=card_bytes, filename="rating_card.png")
 
         # ping_text is deliberately not carried over here — it's the initial
