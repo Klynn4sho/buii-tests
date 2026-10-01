@@ -328,7 +328,7 @@ class HelpView(ui.LayoutView):
         in_list = self.mode != "home"
         pages = self._page_count()
 
-        home = ui.Button(label="⌂ Home", style=discord.ButtonStyle.secondary, disabled=not in_list)
+        home = ui.Button(label="🏠︎ Home", style=discord.ButtonStyle.secondary, disabled=not in_list)
         prev = ui.Button(label="◀", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page <= 0))
         nxt = ui.Button(label="▶", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page >= pages - 1))
         search = ui.Button(label="🔍︎ Search", style=discord.ButtonStyle.primary)
