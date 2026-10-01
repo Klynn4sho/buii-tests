@@ -25,8 +25,8 @@ from core import database
 from core.checks import has_mod_permission
 from core.components import SimpleLayout, Layout, footer_line, notice
 from core.config import COLOR_BRAND, COLOR_DANGER, COLOR_WARNING, COLOR_SUCCESS
-from core.helpers import make_bar, account_maturity_bar, build_joins_graph_async
-from views.growth_views import DashboardView, GraphView
+from core.helpers import make_bar, account_maturity_bar, build_joins_graph_async, create_join_card
+from views.growth_views import DashboardView, GraphView, JoinAlertView
 
 
 def _risk_status(account_age_days: int) -> str:
@@ -144,6 +144,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
 
         i_mention = "N/A"
         inviter = "Unknown / Custom Link"
+        inviter_id = None
         used_code = "Unknown"
 
         # Serialize invite diff+cache-update per guild so two members joining
@@ -160,6 +161,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                         if inv.inviter is not None:
                             i_mention = inv.inviter.mention
                             inviter = inv.inviter.name
+                            inviter_id = inv.inviter.id
                         used_code = inv.code
                         break
 
@@ -179,20 +181,20 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                 if alert_role:
                     alert_role_mention = alert_role.mention + "\n"
 
-        text = (
-            alert_role_mention
-            + f"**{member.name} joined the server**\n\n"
-            + f"**👤 User Information**\n┣ User: {member.mention}\n┣ Username: **{member.name}**\n┗ User ID: `{member.id}`\n\n"
-            + f"**🔗 Invite Details**\n┣ Inviter: **{i_mention}**\n┣ Username: **{inviter}**\n┗ Code: `{used_code}`\n\n"
-            + f"**🛡️ Security Risk Assessment**\n**{alert_status}**\n`{maturity_bar}` **{account_age_days}d** old\n"
-            + footer_line(f"Member #{guild.member_count} • Total Members: {guild.member_count}")
+        card_buf = await create_join_card(
+            self.bot.http_session, member.display_avatar.url, member.display_name, member.name,
+            member.id, inviter, inviter_id, used_code, account_age_days, alert_status,
+            guild.member_count, _risk_color(account_age_days).to_rgb(),
         )
-
-        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=member.display_avatar.url))]
+        view = JoinAlertView(
+            discord.File(fp=card_buf, filename=f"join-{member.id}.png"),
+            f"{alert_role_mention}{member.mention}", member.id, inviter_id, used_code,
+            _risk_color(account_age_days), member.id,
+        )
         try:
             await welcome_channel.send(
-                view=Layout(*items, accent=_risk_color(account_age_days)),
-                allowed_mentions=discord.AllowedMentions(roles=True),
+                view=view, file=view.file,
+                allowed_mentions=discord.AllowedMentions(users=True, roles=True),
             )
         except discord.HTTPException as e:
             print(f"[growth] couldn't post join alert in guild {guild.id}: {e!r}")
@@ -222,6 +224,51 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=ctx.author.display_avatar.url))]
         await ctx.send(view=Layout(*items, accent=_risk_color(account_age_days)))
 
+    @commands.hybrid_command(name="leaderboard", aliases=["lb"], description="Displays top inviters based on recorded join history.")
+    async def leaderboard(self, ctx: commands.Context):
+        results = await database.async_get_leaderboard(ctx.guild.id, limit=10)
+
+        text = "# 🏆 INVITER LEADERBOARD\n-# Top server inviters ranked by recorded join history.\n\n"
+        if results:
+            medals = ["🥇", "🥈", "🥉"]
+            lines = [f"{medals[idx] if idx < 3 else f'`#{idx+1}`'} **{name}** — **{count} joins**"
+                     for idx, (name, count) in enumerate(results)]
+            text += "\n".join(lines)
+        else:
+            text += "*No tracked join data available yet.*"
+        text += "\n" + footer_line("Leaderboard Metrics")
+
+        await ctx.send(view=SimpleLayout(text, accent=COLOR_BRAND))
+
+    @commands.hybrid_command(name="invites", description="View a member's invite history and stats.")
+    async def invites(self, ctx: commands.Context, member: discord.Member = None):
+        member = member or ctx.author
+        totals, left_count, recent = await database.async_get_inviter_stats(ctx.guild.id, member.name)
+
+        total_joins = totals["total_joins"] if totals else 0
+        if not total_joins:
+            await ctx.send(view=notice(f"❌ No recorded joins are credited to **{member.display_name}** yet."), ephemeral=True)
+            return
+
+        flagged_alts = totals["flagged_alts"] or 0
+        retained = total_joins - left_count
+        retention_pct = (retained / total_joins * 100) if total_joins else 0.0
+
+        card_buf = await create_join_card(
+            self.bot.http_session, ctx.author.display_avatar.url,
+            f"{ctx.author.display_name} (TEST PREVIEW)", ctx.author.name, ctx.author.id,
+            ctx.author.name, ctx.author.id, "TESTCODE", account_age_days, alert_status,
+            ctx.guild.member_count, _risk_color(account_age_days).to_rgb(),
+        )
+        view = JoinAlertView(
+            discord.File(fp=card_buf, filename=f"test-join-{ctx.author.id}.png"),
+            ctx.author.mention, ctx.author.id, ctx.author.id, "TESTCODE",
+            _risk_color(account_age_days), ctx.author.id,
+        )
+        await ctx.send(
+            view=view, file=view.file,
+            allowed_mentions=discord.AllowedMentions(users=True, roles=True),
+        )
     @commands.hybrid_command(name="leaderboard", aliases=["lb"], description="Displays top inviters based on recorded join history.")
     async def leaderboard(self, ctx: commands.Context):
         results = await database.async_get_leaderboard(ctx.guild.id, limit=10)
