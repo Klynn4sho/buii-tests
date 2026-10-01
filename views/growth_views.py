@@ -51,9 +51,6 @@ class JoinValueButton(ui.DynamicItem[ui.Button], template=r"join_value\|(?P<kind
         )
 
 
-class JoinAlertView
-
-
 class JoinAlertView(ui.LayoutView):
     """Invite alert image plus private copyable-value responses."""
     def __init__(self, card_file, ping_text, user_id, inviter_id, invite_code, accent, member_id):
