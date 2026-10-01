@@ -240,9 +240,13 @@ async def create_join_card(
         draw.rounded_rectangle([bar_x, bar_y, bar_x + fill_w, bar_y + bar_h],
                                radius=bar_h // 2, fill=accent)
 
-    age_text = f"Account age: {account_age_days}d / 30d+   •   Server members: {member_count}"
-    age_font = get_font(19)
-    draw.text((76, risk_y + 112), age_text, fill=muted, font=age_font)
+    age_text = f"{account_age_days} DAYS OLD"
+    age_font = get_font(23, bold=True)
+    draw.text((76, risk_y + 110), age_text, fill=accent, font=age_font)
+    member_text = f"Server members: {member_count}"
+    member_font = get_font(18)
+    member_w = draw.textlength(member_text, font=member_font)
+    draw.text((W - 76 - member_w, risk_y + 114), member_text, fill=muted, font=member_font)
 
     buf = io.BytesIO()
     card.save(buf, format="PNG", optimize=True)
