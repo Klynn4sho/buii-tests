@@ -45,12 +45,12 @@ class Category:
 # Order here is the display order. A cog not listed falls into OTHER, so a
 # newly added cog never silently vanishes from help.
 CATEGORIES = (
-    Category("music", "♬", "Music", "MusicCog", "rate tracks, leaderboards & Spotify sync"),
-    Category("growth", "☍", "Invites & Growth", "GrowthCog", "invite tracking, join alerts & analytics"),
-    Category("staff", "ⓘ", "Staff Directory", "HierarchyCog", "role hierarchy image"),
-    Category("admin", "🛠", "Admin & Tools", "AdminCog", "help & slash-command sync"),
+    Category("music", "🎵", "Music", "MusicCog", "rate tracks, leaderboards & Spotify sync"),
+    Category("growth", "🔗", "Invites & Growth", "GrowthCog", "invite tracking, join alerts & analytics"),
+    Category("staff", "🪪", "Staff Directory", "HierarchyCog", "role hierarchy image"),
+    Category("admin", "🛠️", "Admin & Tools", "AdminCog", "help & slash-command sync"),
 )
-OTHER = Category("other", "☰", "Other", "", "everything else")
+OTHER = Category("other", "📦", "Other", "", "everything else")
 
 
 @dataclass
@@ -254,20 +254,19 @@ class HelpView(ui.LayoutView):
         )
         how_to = (
             "### **How to use this menu**\n"
-            "🗁 **Category menu** below — pick a category to browse its commands\n"
-            "🔍︎ **Search** button — jump straight to any command by name\n"
-            "⫘ **Link buttons** — dashboard, privacy policy & terms"
-            "☍ **Link buttons** — dashboard, privacy policy & terms"
+            "- **Category menu** below — pick a category to browse its commands\n"
+            "- **Search** button — jump straight to any command by name\n"
+            "- **Link buttons** — dashboard, privacy policy & terms"
         )
         browse_lines = [
-            f"{c.emoji} **{c.label}** — {len(self.catalog[c.key])} command"
+            f"- **{c.label}** — {len(self.catalog[c.key])} command"
             f"{'s' if len(self.catalog[c.key]) != 1 else ''} · {c.blurb}"
             for c in self.categories
         ]
         browse = f"### **Browse by category** ({total} commands)\n" + "\n".join(browse_lines)
         setup = (
             "### **Set it up in clicks**\n"
-            f"🌏︎ **[Open the dashboard]({DASHBOARD_URL})** — configure the bot visually, no commands needed.\n"
+            f"**[Open the dashboard]({DASHBOARD_URL})** — configure the bot visually, no commands needed.\n"
             "-# Join log channel · Alert & mod roles · Prefix · Music channel, role & lock"
         )
 
@@ -297,7 +296,7 @@ class HelpView(ui.LayoutView):
             empty = "*No commands in this category.*"
         else:
             shown = discord.utils.escape_markdown(self.query[:40])
-            title = "🔍︎ Search"
+            title = "🔍 Search"
             crumb = f"Home › Search “{shown}”{page_label} · {len(entries)} result{'s' if len(entries) != 1 else ''}"
             empty = f"*No commands matched **{shown}**. Try a shorter name.*"
 
@@ -331,7 +330,7 @@ class HelpView(ui.LayoutView):
 
         home = ui.Button(label="Home", emoji="🏠︎", style=discord.ButtonStyle.secondary, disabled=not in_list)
         prev = ui.Button(emoji="◀", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page <= 0))
-        nxt = ui.Button(emoji="▶", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page >= pages - 1))
+        nxt = ui.Button(emoji="◄", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page >= pages - 1))
         search = ui.Button(label="Search", emoji="🔍︎", style=discord.ButtonStyle.primary)
         close = ui.Button(label="Close", emoji="✕", style=discord.ButtonStyle.danger)
 
