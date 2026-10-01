@@ -31,7 +31,7 @@ def subtext(text: str) -> str:
 
 
 def footer_line(text: str = "Buii Analytics Core") -> str:
-    return subtext(f"⚙️ {text} • System Operational")
+    return subtext(text)
 
 
 class Layout(ui.LayoutView):
