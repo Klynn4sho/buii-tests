@@ -157,6 +157,81 @@ async def build_joins_graph_async(guild_id, days=30):
 
 
 # ==========================================================================
+# Pillow invite/join alert card
+# ==========================================================================
+
+async def create_join_card(
+    session, avatar_url: str, member_name: str, username: str, user_id: int,
+    inviter_name: str, inviter_id: int | None, invite_code: str,
+    account_age_days: int, risk_status: str, member_count: int, accent_rgb: tuple,
+):
+    """Render a compact invite alert image with all raw details."""
+    W, H = 1100, 620
+    bg, panel = "#111214", "#1E2024"
+    muted, white = "#A7ADB7", "#F2F3F5"
+    accent = _rgb_to_hex(accent_rgb)
+    card = Image.new("RGB", (W, H), bg)
+    draw = ImageDraw.Draw(card)
+    draw.rounded_rectangle([12, 12, W - 12, H - 12], radius=24, fill=panel, outline=accent, width=4)
+    draw.rectangle([12, 12, 24, H - 12], fill=accent)
+
+    avatar_size = 180
+    avatar = None
+    if avatar_url:
+        try:
+            async with session.get(avatar_url, timeout=5) as resp:
+                if resp.status == 200:
+                    avatar = Image.open(io.BytesIO(await resp.read())).convert("RGB").resize(
+                        (avatar_size, avatar_size), Image.LANCZOS
+                    )
+        except Exception:
+            pass
+    if avatar is None:
+        avatar = Image.new("RGB", (avatar_size, avatar_size), "#2B2D31")
+        ImageDraw.Draw(avatar).text((avatar_size // 2 - 20, avatar_size // 2 - 25), "?", fill=muted, font=get_font(48, bold=True))
+
+    avatar_x, avatar_y = W - 230, 42
+    mask = _rounded_mask((avatar_size, avatar_size), 26)
+    card.paste(avatar, (avatar_x, avatar_y), mask)
+    draw.rounded_rectangle([avatar_x, avatar_y, avatar_x + avatar_size, avatar_y + avatar_size], radius=26, outline=accent, width=3)
+
+    draw.text((52, 44), "NEW MEMBER JOIN", fill=accent, font=get_font(24, bold=True))
+    title_font = get_font(42, bold=True)
+    draw.text((52, 86), _truncate_to_width(draw, member_name, title_font, 650), fill=white, font=title_font)
+    draw.text((52, 140), f"@{username}", fill=muted, font=get_font(22))
+
+    def section(y, label, rows):
+        draw.text((52, y), label.upper(), fill=accent, font=get_font(18, bold=True))
+        y += 34
+        for name, value in rows:
+            value_font = get_font(21)
+            draw.text((52, y), f"{name}:", fill=muted, font=get_font(21, bold=True))
+            draw.text((250, y), _truncate_to_width(draw, str(value), value_font, 790), fill=white, font=value_font)
+            y += 34
+
+    section(210, "USER INFORMATION", [("User ID", user_id), ("Username", username)])
+    section(320, "INVITE DETAILS", [
+        ("Inviter", inviter_name or "Unknown / Custom Link"),
+        ("Inviter ID", inviter_id or "Unknown"),
+        ("Invite Code", invite_code or "Unknown"),
+    ])
+
+    risk_y = 470
+    draw.rounded_rectangle([52, risk_y, W - 52, risk_y + 92], radius=16, fill="#16181B", outline=accent, width=2)
+    draw.text((76, risk_y + 16), "SECURITY", fill=accent, font=get_font(18, bold=True))
+    draw.text((76, risk_y + 48), risk_status, fill=white, font=get_font(22, bold=True))
+    age_text = f"Account age: {account_age_days}d   •   Server members: {member_count}"
+    age_font = get_font(19)
+    age_w = draw.textlength(age_text, font=age_font)
+    draw.text((W - 76 - age_w, risk_y + 50), age_text, fill=muted, font=age_font)
+
+    buf = io.BytesIO()
+    card.save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    return buf
+
+
+# ==========================================================================
 # Pillow dynamic music rating card
 # ==========================================================================
 
