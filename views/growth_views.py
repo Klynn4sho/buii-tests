@@ -31,6 +31,38 @@ async def _notify_error(interaction: discord.Interaction, text: str):
         pass
 
 
+class JoinAlertView(ui.LayoutView):
+    """Invite alert image plus private copyable-value responses."""
+    def __init__(self, card_file, ping_text, user_id, inviter_id, invite_code, accent, member_id):
+        super().__init__(timeout=None)
+        self.file = card_file
+
+        def value_button(label, value, suffix):
+            button = ui.Button(label=label, style=discord.ButtonStyle.secondary, custom_id=f"join_value|{member_id}|{suffix}")
+
+            async def callback(interaction):
+                await interaction.response.send_message(
+                    view=SimpleLayout(f"**{label}**\n{value}"),
+                    ephemeral=True,
+                )
+
+            button.callback = callback
+            return button
+
+        buttons = [
+            value_button("User ID", str(user_id), "user"),
+            value_button("Inviter ID", str(inviter_id or "Unknown"), "inviter"),
+            value_button("Invite Code", str(invite_code or "Unknown"), "code"),
+        ]
+        self.container = ui.Container(
+            ui.TextDisplay(ping_text),
+            ui.MediaGallery(discord.MediaGalleryItem(card_file)),
+            ui.ActionRow(*buttons),
+            accent_color=accent,
+        )
+        self.add_item(self.container)
+
+
 class DashboardView(ui.LayoutView):
     def __init__(self, content_items: list | None = None):
         super().__init__(timeout=None)
