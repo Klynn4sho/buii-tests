@@ -1,50 +1,69 @@
 """
-The bot's real command list, for the dashboard's Commands page. Kept as a
-small static manifest rather than introspected from bot.commands at request
-time, since the command set is fixed in code (not per-guild configurable —
-there is no disable-a-command-per-guild feature in this bot), so there's
-nothing live to bridge into the bot's loop for. If that changes later (a
-real per-guild command-toggle table), this becomes the seed data for it.
+Admin utilities: the /help directory (a section-by-section Components V2
+menu, see views/help_views.py) and /sync for pushing slash commands to a
+guild or globally.
 
-Keep this in sync with the category grouping in views/help_views.py
-(CATEGORIES) by hand; there are few enough commands that automatic sync
-isn't worth the complexity. (The in-Discord /help menu, unlike this file,
-is built live from the bot, so it never needs manual updating.)
+Help's category grouping lives in views/help_views.py (CATEGORIES), keyed
+by cog name. A cog not listed there falls into "📦 Other" automatically.
 """
 
-COMMANDS = [
-    # --- Music ---
-    {"name": "song", "category": "music", "description": "Nominate a song by name for rating (no link needed)."},
-    {"name": "musicleaderboard", "category": "music", "description": "Show the top rated songs, optionally filtered by minimum score."},
-    {"name": "removesong", "category": "music", "description": "Remove a song and its votes from the database and playlist."},
-    {"name": "closevoting", "category": "music", "description": "Freeze a song's score so no new votes can be cast."},
-    {"name": "myratings", "category": "music", "description": "View your personal music rating statistics and top picks."},
-    {"name": "songratings", "category": "music", "description": "Check individual member ratings for a specific song ID."},
-    {"name": "renumbersongs", "category": "music", "description": "Re-sequence song IDs to close gaps left by deletions."},
-    {"name": "setmusicchannel", "category": "music", "description": "Restrict music link detection to a specific channel."},
-    {"name": "setmusiclock", "category": "music", "description": "Set channel lock duration after a song is posted."},
-    {"name": "setmusicrole", "category": "music", "description": "Select a role to ping when a new song is posted."},
-    {"name": "synctoplaylist", "category": "music", "description": "Manually add a song to the Spotify playlist."},
-    # --- Growth ---
-    {"name": "leaderboard", "category": "growth", "description": "Top inviters ranked by recorded join history."},
-    {"name": "invites", "category": "growth", "description": "View a member's invite history and stats."},
-    {"name": "statspanel", "category": "growth", "description": "Deploy an auto-refreshing live server growth dashboard."},
-    {"name": "graph", "category": "growth", "description": "Display daily growth trend charts."},
-    {"name": "testjoin", "category": "growth", "description": "Preview the join-risk alert layout."},
-    {"name": "setlog", "category": "growth", "description": "Lock join notifications to the current channel."},
-    {"name": "setalertrole", "category": "growth", "description": "Set the role pinged for extreme-risk joins."},
-    {"name": "setmodrole", "category": "growth", "description": "Set a role that can manage bot config without Manage Server."},
-    {"name": "setprefix", "category": "growth", "description": "Change the server's text-command prefix."},
-    # --- Staff directory ---
-    {"name": "hierarchy", "category": "staff", "description": "Render a staff directory image of every moderation role."},
-    # --- Admin ---
-    {"name": "help", "category": "admin", "description": "Browse every command by category, with search."},
-    {"name": "sync", "category": "admin", "description": "Push slash commands to this server or globally."},
-]
+import discord
+from discord.ext import commands
 
-CATEGORY_LABELS = {
-    "music": "Music",
-    "growth": "Invites & Growth",
-    "staff": "Staff Directory",
-    "admin": "Admin",
-}
+from core import database
+from core.components import notice
+from core.config import DEFAULT_PREFIX
+from views.help_views import HelpView
+
+
+class AdminCog(commands.Cog, name="AdminCog"):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @commands.hybrid_command(name="help", aliases=["h"], description="Browse every command by category, with search.")
+    async def help_command(self, ctx: commands.Context):
+        try:
+            prefix = await database.async_get_prefix(ctx.guild.id) if ctx.guild else DEFAULT_PREFIX
+            view = HelpView(self.bot, ctx.author, prefix)
+            view.sent_message = await ctx.send(view=view)
+        except Exception as e:
+            print(f"[help] failed to open help menu: {e!r}")
+            try:
+                await ctx.send(view=notice("❌ Couldn't open the help menu — try again in a moment."))
+            except Exception:
+                pass
+
+    @commands.command(name="sync")
+    @commands.has_permissions(administrator=True)
+    @commands.cooldown(rate=1, per=60.0, type=commands.BucketType.guild)
+    async def sync_commands(self, ctx: commands.Context, option: str = None):
+        try:
+            if option == "clear":
+                self.bot.tree.clear_commands(guild=ctx.guild)
+                await self.bot.tree.sync(guild=ctx.guild)
+                await ctx.send(view=notice("🧹 **Cleared all guild slash commands!**"))
+            elif option == "global":
+                synced = await self.bot.tree.sync()
+                await ctx.send(view=notice(f"🌐 **Synced {len(synced)} commands globally!**"))
+            else:
+                self.bot.tree.clear_commands(guild=ctx.guild)
+                self.bot.tree.copy_global_to(guild=ctx.guild)
+                synced = await self.bot.tree.sync(guild=ctx.guild)
+                await ctx.send(view=notice(f"⚡ **Clean-synced {len(synced)} Slash Commands to this server without duplication!**"))
+        except discord.HTTPException as e:
+            print(f"[sync] failed: {e!r}")
+            await ctx.send(view=notice("❌ Discord rejected the sync request — you may be rate-limited. Try again shortly."))
+
+    @sync_commands.error
+    async def sync_commands_error(self, ctx: commands.Context, error: commands.CommandError):
+        if isinstance(error, commands.CommandOnCooldown):
+            await ctx.send(view=notice(
+                f"⏱️ `sync` was just run — try again in **{error.retry_after:.0f}s**. "
+                f"(This guards against tripping Discord's own command-sync rate limit.)"
+            ))
+            return
+        raise error
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(AdminCog(bot))
