@@ -45,7 +45,7 @@ class JoinValueButton(ui.DynamicItem[ui.Button], template=r"join_value\|(?P<kind
         labels = {"user": "User ID", "inviter": "Inviter ID", "code": "Invite Code"}
         await interaction.response.send_message(
             view=SimpleLayout(
-                f"### {labels[self.kind]}\n\n**Value:** {self.value}"
+                f"### {labels[self.kind]}\n\n**Value:** `{self.value}`"
             ),
             ephemeral=True,
         )
@@ -63,7 +63,7 @@ class JoinAlertView(ui.LayoutView):
             async def callback(interaction):
                 await interaction.response.send_message(
                     view=SimpleLayout(
-                        f"### {label}\n\n**Value:** {value}"
+                        f"### {label}\n\n**Value:** `{value}`"
                     ),
                     ephemeral=True,
                 )
