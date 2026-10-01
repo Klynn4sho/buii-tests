@@ -187,9 +187,18 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             member.id, inviter, inviter_id, used_code, account_age_days, alert_status,
             guild.member_count, _risk_color(account_age_days).to_rgb(),
         )
+        ping_text = " ".join(part for part in (alert_role_mention.strip(), member.mention) if part)
+        info_text = (
+            f"### {member.display_name}\n"
+            f"**Username:** {member.name} · **User ID:** `{member.id}`\n"
+            f"**Inviter:** {inviter} · **Inviter ID:** `{inviter_id or 'Unknown'}`\n"
+            f"**Invite code:** `{used_code}`\n"
+            f"**Risk:** {alert_status} · **Account age:** `{account_age_days}d` · "
+            f"**Server members:** `{guild.member_count}`"
+        )
         view = JoinAlertView(
             discord.File(fp=card_buf, filename=f"join-{member.id}.png"),
-            f"{alert_role_mention}{member.mention}", member.id, inviter_id, used_code,
+            ping_text, info_text, member.id, inviter_id, used_code,
             _risk_color(account_age_days), member.id,
         )
         try:
@@ -227,9 +236,18 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             ctx.author.name, ctx.author.id, "TESTCODE", account_age_days, alert_status,
             ctx.guild.member_count, _risk_color(account_age_days).to_rgb(),
         )
+        ping_text = " ".join(part for part in (alert_role_mention.strip(), ctx.author.mention) if part)
+        info_text = (
+            f"### {ctx.author.display_name} (TEST PREVIEW)\n"
+            f"**Username:** {ctx.author.name} · **User ID:** `{ctx.author.id}`\n"
+            f"**Inviter:** {ctx.author.name} · **Inviter ID:** `{ctx.author.id}`\n"
+            f"**Invite code:** `TESTCODE`\n"
+            f"**Risk:** {alert_status} · **Account age:** `{account_age_days}d` · "
+            f"**Server members:** `{ctx.guild.member_count}`"
+        )
         view = JoinAlertView(
             discord.File(fp=card_buf, filename=f"test-join-{ctx.author.id}.png"),
-            f"{alert_role_mention}{ctx.author.mention}", ctx.author.id, ctx.author.id, "TESTCODE",
+            ping_text, info_text, ctx.author.id, ctx.author.id, "TESTCODE",
             _risk_color(account_age_days), ctx.author.id,
         )
         await ctx.send(
