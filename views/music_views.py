@@ -43,18 +43,19 @@ def _track_text(title: str, artist: str, preview_url: str = None, url: str = Non
 
 
 class PreviewButton(ui.Button):
-    def __init__(self, song_id: int, disabled: bool = False):
+    def __init__(self, guild_id: int, song_id: int, disabled: bool = False):
         super().__init__(
             label="▶ Preview",
             style=discord.ButtonStyle.primary,
             custom_id=f"preview|{song_id}",
             disabled=disabled,
         )
+        self.guild_id = guild_id
         self.song_id = song_id
 
     async def callback(self, interaction: discord.Interaction):
         try:
-            song = await database.get_song(self.song_id)
+            song = await database.get_song(self.guild_id, self.song_id)
             preview_url = song.get("preview_url") if song else None
             if not preview_url:
                 await interaction.response.send_message(
@@ -97,7 +98,7 @@ class PreviewButton(ui.Button):
             if not data:
                 raise RuntimeError("preview download was empty")
 
-            if not await database.claim_preview(self.song_id):
+            if not await database.claim_preview(self.guild_id, self.song_id):
                 self.disabled = True
                 if interaction.message is not None and self.view is not None:
                     await interaction.message.edit(view=self.view)
@@ -132,11 +133,12 @@ class PreviewButton(ui.Button):
 
 
 class RatingButton(ui.Button):
-    def __init__(self, score: int, song_id: int):
+    def __init__(self, guild_id: int, score: int, song_id: int):
         # No `row=` here: RatingView groups these into two explicit
         # ActionRows (1-5, 6-10), which already decide the layout.
         super().__init__(label=str(score), style=discord.ButtonStyle.secondary,
                           custom_id=f"rate|{song_id}|{score}")
+        self.guild_id = guild_id
         self.score = score
         self.song_id = song_id
 
@@ -155,7 +157,7 @@ class RatingButton(ui.Button):
                 pass
 
     async def _vote(self, interaction: discord.Interaction):
-        song = await database.get_song(self.song_id)
+        song = await database.get_song(self.guild_id, self.song_id)
 
         if song and song.get("closed"):
             await interaction.response.send_message(view=notice("🔒 Voting on this track is closed."), ephemeral=True)
@@ -170,19 +172,19 @@ class RatingButton(ui.Button):
             return
 
         bot = interaction.client
-        await database.set_rating(self.song_id, interaction.user.id, self.score)
-        avg, count = await database.get_song_stats(self.song_id)
-        song = await database.get_song(self.song_id)  # re-fetch so synced/closed reflect the latest DB state
+        await database.set_rating(self.guild_id, self.song_id, interaction.user.id, self.score)
+        avg, count = await database.get_song_stats(self.guild_id, self.song_id)
+        song = await database.get_song(self.guild_id, self.song_id)  # re-fetch so synced/closed reflect the latest DB state
 
         sync_alert = ""
         if song["url"]:
             if avg >= 6.0 and not song["synced"]:
                 if await sync_to_spotify(bot.http_session, song["url"]):
-                    await database.mark_song_synced(self.song_id)
+                    await database.mark_song_synced(self.guild_id, self.song_id)
                     sync_alert = "\n✅ *Track crossed 6.0 average and was added to the server Spotify playlist!*"
             elif avg < 6.0 and song["synced"]:
                 if await remove_from_spotify(bot.http_session, song["url"]):
-                    await database.unmark_song_synced(self.song_id)
+                    await database.unmark_song_synced(self.guild_id, self.song_id)
                     sync_alert = "\n⚠️ *Track dropped below 6.0 average and was removed from the server Spotify playlist.*"
 
         card_bytes, dominant_rgb = await create_music_card(bot.http_session, song["title"], song["artist"], song["cover_url"],
@@ -195,7 +197,7 @@ class RatingButton(ui.Button):
         # requester_name (the "Requested by ..." line) IS carried over,
         # since that's a permanent attribution, not a one-time notification.
         new_view = RatingView(
-            song["id"], title=song["title"], artist=song["artist"],
+            self.guild_id, song["id"], song["song_number"], title=song["title"], artist=song["artist"],
             requester_name=song["requested_by_name"], avg=avg, count=count,
             preview_url=song["preview_url"], url=song["url"], card_file=new_file,
             accent_rgb=dominant_rgb, vote_note=f"Your vote: {self.score}/10 — use buttons to change",
@@ -208,7 +210,7 @@ class RatingButton(ui.Button):
 
 
 class RatingView(ui.LayoutView):
-    def __init__(self, song_id: int, *, title: str = None, artist: str = None,
+    def __init__(self, guild_id: int, song_id: int, song_number: int, *, title: str = None, artist: str = None,
                  requester_name: str = None, avg: float = 0.0, count: int = 0,
                  preview_url: str = None, url: str = None, card_file: "discord.File | str | None" = None,
                  accent_rgb: tuple = (88, 101, 242), ping_text: str = None, vote_note: str = None,
@@ -219,21 +221,23 @@ class RatingView(ui.LayoutView):
         latter avoids re-rendering/re-uploading the card image when only
         the buttons or text need to change (see renumbersongs)."""
         super().__init__(timeout=None)
+        self.guild_id = guild_id
         self.song_id = song_id
+        self.song_number = song_number
 
         items = [ui.TextDisplay(_track_text(title, artist, preview_url, url, requester_name, ping_text))]
         if card_file is not None:
             items.append(ui.MediaGallery(discord.MediaGalleryItem(card_file)))
 
-        link_buttons = [PreviewButton(song_id, disabled=preview_used)]
+        link_buttons = [PreviewButton(guild_id, song_id, disabled=preview_used)]
         if url:
             link_buttons.append(ui.Button(label="↗ Source", style=discord.ButtonStyle.link, url=url))
         items.append(ui.ActionRow(*link_buttons))
-        items.append(ui.ActionRow(*(RatingButton(i, song_id) for i in range(1, 6))))
-        items.append(ui.ActionRow(*(RatingButton(i, song_id) for i in range(6, 11))))
+        items.append(ui.ActionRow(*(RatingButton(guild_id, i, song_id) for i in range(1, 6))))
+        items.append(ui.ActionRow(*(RatingButton(guild_id, i, song_id) for i in range(6, 11))))
 
         footer_text = vote_note or "Rate it using the buttons below"
-        items.append(ui.TextDisplay(footer_line(f"ID: {song_id} • {footer_text}")))
+        items.append(ui.TextDisplay(footer_line(f"ID: {song_number} • {footer_text}")))
 
         color = discord.Color.from_str(score_color(avg)) if count > 0 else discord.Color.from_rgb(*accent_rgb)
         self.container = ui.Container(*items, accent_color=color)
@@ -268,7 +272,7 @@ class ClosedRatingView(ui.LayoutView):
             )))
 
         items.append(ui.TextDisplay(footer_line(
-            f"ID: {song['id']} • 🔒 Voting closed after {RATING_WINDOW_HOURS} hours • Final: {avg:.1f}/10 ({count} votes)"
+            f"ID: {song['song_number']} • 🔒 Voting closed after {RATING_WINDOW_HOURS} hours • Final: {avg:.1f}/10 ({count} votes)"
         )))
 
         color = discord.Color.from_str(score_color(avg)) if count > 0 else discord.Color.dark_grey()
