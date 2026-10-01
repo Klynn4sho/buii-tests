@@ -22,8 +22,14 @@ db_pool = None
 
 def init_db_pool():
     global db_pool
-    if not db_pool:
+    if db_pool:
+        return
+    if not DB_CONNECTION_STRING:
+        raise RuntimeError("DB_URL environment variable is not set.")
+    try:
         db_pool = psycopg2.pool.SimpleConnectionPool(1, 5, DB_CONNECTION_STRING)
+    except psycopg2.Error as exc:
+        raise RuntimeError("Could not connect to PostgreSQL. Check DB_URL and database availability.") from exc
 
 
 def get_db_conn():
@@ -37,7 +43,11 @@ def get_db_conn():
 
 
 def release_db_conn(conn):
-    db_pool.putconn(conn)
+    if db_pool is None or conn is None:
+        return
+    # Broken connections must not be returned to the pool; otherwise one
+    # transient network failure can poison every later database operation.
+    db_pool.putconn(conn, close=bool(conn.closed))
 
 
 # In-memory prefix cache so async_get_prefix doesn't hit the DB on every
@@ -120,6 +130,29 @@ def _raw_init_music_db():
         cursor.execute('ALTER TABLE songs ADD COLUMN IF NOT EXISTS genre TEXT;')
         cursor.execute('ALTER TABLE songs ADD COLUMN IF NOT EXISTS closed INTEGER DEFAULT 0;')
         cursor.execute('ALTER TABLE songs ADD COLUMN IF NOT EXISTS preview_used INTEGER DEFAULT 0;')
+        cursor.execute('ALTER TABLE songs ADD COLUMN IF NOT EXISTS song_number INTEGER;')
+        cursor.execute('''
+            UPDATE songs s
+            SET song_number = numbered.song_number
+            FROM (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY guild_id ORDER BY id) AS song_number
+                FROM songs
+                WHERE song_number IS NULL
+            ) AS numbered
+            WHERE s.id = numbered.id;
+        ''')
+        cursor.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS songs_guild_song_number_idx
+            ON songs (guild_id, song_number);
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS songs_guild_created_idx
+            ON songs (guild_id, created_at DESC);
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS ratings_song_id_idx
+            ON ratings (song_id);
+        ''')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS ratings (
                 song_id INTEGER NOT NULL REFERENCES songs(id),
