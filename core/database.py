@@ -783,7 +783,7 @@ def _raw_get_recent_songs(limit):
     conn = get_db_conn()
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute('SELECT id FROM songs ORDER BY id DESC LIMIT %s;', (limit,))
+        cursor.execute('SELECT id, preview_used FROM songs ORDER BY id DESC LIMIT %s;', (limit,))
         rows = cursor.fetchall()
         cursor.close()
         return rows
