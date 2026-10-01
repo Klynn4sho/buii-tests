@@ -48,11 +48,12 @@ def _track_text(title: str, artist: str, preview_url: str = None, url: str = Non
 
 
 class PreviewButton(ui.Button):
-    def __init__(self, song_id: int):
+    def __init__(self, song_id: int, disabled: bool = False):
         super().__init__(
             label="▶ Preview",
             style=discord.ButtonStyle.primary,
             custom_id=f"preview|{song_id}",
+            disabled=disabled,
         )
         self.song_id = song_id
 
@@ -88,6 +89,9 @@ class PreviewButton(ui.Button):
                 raise RuntimeError("preview download was empty")
 
             if not await database.claim_preview(self.song_id):
+                self.disabled = True
+                if interaction.message is not None and self.view is not None:
+                    await interaction.message.edit(view=self.view)
                 await interaction.followup.send(
                     view=notice("⚠️ This preview has already been used."),
                     ephemeral=True,
@@ -187,6 +191,7 @@ class RatingButton(ui.Button):
             requester_name=song["requested_by_name"], avg=avg, count=count,
             preview_url=song["preview_url"], url=song["url"], card_file=new_file,
             accent_rgb=dominant_rgb, vote_note=f"Your vote: {self.score}/10 — use buttons to change",
+            preview_used=bool(song.get("preview_used")),
         )
 
         await interaction.response.edit_message(view=new_view, attachments=[new_file])
@@ -197,7 +202,8 @@ class RatingView(ui.LayoutView):
     def __init__(self, song_id: int, *, title: str = None, artist: str = None,
                  requester_name: str = None, avg: float = 0.0, count: int = 0,
                  preview_url: str = None, url: str = None, card_file: "discord.File | str | None" = None,
-                 accent_rgb: tuple = (88, 101, 242), ping_text: str = None, vote_note: str = None):
+                 accent_rgb: tuple = (88, 101, 242), ping_text: str = None, vote_note: str = None,
+                 preview_used: bool = False):
         """`card_file` accepts either a fresh discord.File (uploaded with
         this message) or an "attachment://<filename>" string pointing at an
         attachment that already exists on the message being edited — the
@@ -210,7 +216,7 @@ class RatingView(ui.LayoutView):
         if card_file is not None:
             items.append(ui.MediaGallery(discord.MediaGalleryItem(card_file)))
 
-        items.append(ui.ActionRow(PreviewButton(song_id)))
+        items.append(ui.ActionRow(PreviewButton(song_id, disabled=preview_used)))
         items.append(ui.ActionRow(*(RatingButton(i, song_id) for i in range(1, 6))))
         items.append(ui.ActionRow(*(RatingButton(i, song_id) for i in range(6, 11))))
 
