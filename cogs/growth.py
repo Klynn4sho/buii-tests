@@ -212,48 +212,6 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         alert_status = _risk_status(account_age_days)
         maturity_bar = account_maturity_bar(account_age_days)
 
-        text = (
-            "🧪 **Test Join Alert Preview**\n\n"
-            f"**{ctx.author.name} (TEST PREVIEW)**\n\n"
-            f"**👤 User Information**\n┣ User: {ctx.author.mention}\n┣ Username: **{ctx.author.name}**\n┗ User ID: `{ctx.author.id}`\n\n"
-            f"**🔗 Invite Details**\n┣ Inviter: **{ctx.author.mention}**\n┣ Username: **TestInviter#0001**\n┗ Code: `TESTCODE`\n\n"
-            f"**🛡️ Security Risk Assessment**\n**{alert_status}**\n`{maturity_bar}` **{account_age_days}d** old\n"
-            + footer_line(f"Member #{ctx.guild.member_count} • Total Members: {ctx.guild.member_count} (TEST PREVIEW)")
-        )
-
-        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=ctx.author.display_avatar.url))]
-        await ctx.send(view=Layout(*items, accent=_risk_color(account_age_days)))
-
-    @commands.hybrid_command(name="leaderboard", aliases=["lb"], description="Displays top inviters based on recorded join history.")
-    async def leaderboard(self, ctx: commands.Context):
-        results = await database.async_get_leaderboard(ctx.guild.id, limit=10)
-
-        text = "# 🏆 INVITER LEADERBOARD\n-# Top server inviters ranked by recorded join history.\n\n"
-        if results:
-            medals = ["🥇", "🥈", "🥉"]
-            lines = [f"{medals[idx] if idx < 3 else f'`#{idx+1}`'} **{name}** — **{count} joins**"
-                     for idx, (name, count) in enumerate(results)]
-            text += "\n".join(lines)
-        else:
-            text += "*No tracked join data available yet.*"
-        text += "\n" + footer_line("Leaderboard Metrics")
-
-        await ctx.send(view=SimpleLayout(text, accent=COLOR_BRAND))
-
-    @commands.hybrid_command(name="invites", description="View a member's invite history and stats.")
-    async def invites(self, ctx: commands.Context, member: discord.Member = None):
-        member = member or ctx.author
-        totals, left_count, recent = await database.async_get_inviter_stats(ctx.guild.id, member.name)
-
-        total_joins = totals["total_joins"] if totals else 0
-        if not total_joins:
-            await ctx.send(view=notice(f"❌ No recorded joins are credited to **{member.display_name}** yet."), ephemeral=True)
-            return
-
-        flagged_alts = totals["flagged_alts"] or 0
-        retained = total_joins - left_count
-        retention_pct = (retained / total_joins * 100) if total_joins else 0.0
-
         card_buf = await create_join_card(
             self.bot.http_session, ctx.author.display_avatar.url,
             f"{ctx.author.display_name} (TEST PREVIEW)", ctx.author.name, ctx.author.id,
@@ -269,6 +227,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             view=view, file=view.file,
             allowed_mentions=discord.AllowedMentions(users=True, roles=True),
         )
+
     @commands.hybrid_command(name="leaderboard", aliases=["lb"], description="Displays top inviters based on recorded join history.")
     async def leaderboard(self, ctx: commands.Context):
         results = await database.async_get_leaderboard(ctx.guild.id, limit=10)
