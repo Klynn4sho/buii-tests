@@ -26,7 +26,7 @@ from core.checks import has_mod_permission
 from core.components import SimpleLayout, Layout, footer_line, notice
 from core.config import COLOR_BRAND, COLOR_DANGER, COLOR_WARNING, COLOR_SUCCESS
 from core.helpers import make_bar, account_maturity_bar, build_joins_graph_async, create_join_card
-from views.growth_views import DashboardView, GraphView, JoinAlertView
+from views.growth_views import DashboardView, GraphView, JoinAlertView, JoinValueButton
 
 
 def _risk_status(account_age_days: int) -> str:
@@ -58,6 +58,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         # so DashboardView()'s placeholder content and GraphView's dummy
         # placeholder file (never actually uploaded) are both safe to use
         # here; only the buttons'/select's custom_ids need to match.
+        self.bot.add_dynamic_items(JoinValueButton)
         self.bot.add_view(DashboardView())
         self.bot.add_view(GraphView(days=30, graph_file=discord.File(
             fp=io.BytesIO(b""), filename="joins_graph.png"
