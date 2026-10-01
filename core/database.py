@@ -876,7 +876,7 @@ def _raw_get_music_leaderboard(guild_id, limit, min_votes, min_score=0.0):
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute('''
-            SELECT s.id, s.title, s.artist, s.created_at, AVG(r.score) AS avg_score, COUNT(r.score) AS votes
+            SELECT s.id, s.song_number, s.title, s.artist, s.created_at, AVG(r.score) AS avg_score, COUNT(r.score) AS votes
             FROM songs s JOIN ratings r ON s.id = r.song_id
             WHERE s.guild_id = %s GROUP BY s.id
             HAVING COUNT(r.score) >= %s AND AVG(r.score) >= %s
