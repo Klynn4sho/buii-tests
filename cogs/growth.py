@@ -213,6 +213,14 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         alert_status = _risk_status(account_age_days)
         maturity_bar = account_maturity_bar(account_age_days)
 
+        alert_role_mention = ""
+        if account_age_days < 7:
+            alert_role_id = await database.async_get_alert_role(ctx.guild.id)
+            if alert_role_id:
+                alert_role = ctx.guild.get_role(alert_role_id)
+                if alert_role:
+                    alert_role_mention = alert_role.mention + "\n"
+
         card_buf = await create_join_card(
             self.bot.http_session, ctx.author.display_avatar.url,
             f"{ctx.author.display_name} (TEST PREVIEW)", ctx.author.name, ctx.author.id,
@@ -221,7 +229,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         )
         view = JoinAlertView(
             discord.File(fp=card_buf, filename=f"test-join-{ctx.author.id}.png"),
-            ctx.author.mention, ctx.author.id, ctx.author.id, "TESTCODE",
+            f"{alert_role_mention}{ctx.author.mention}", ctx.author.id, ctx.author.id, "TESTCODE",
             _risk_color(account_age_days), ctx.author.id,
         )
         await ctx.send(
