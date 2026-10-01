@@ -260,7 +260,7 @@ class HelpView(ui.LayoutView):
             "☍ **Link buttons** — dashboard, privacy policy & terms"
         )
         browse_lines = [
-            f"{c.emoji} **{c.label}** — {len(self.catalog[c.key])} command"
+            f"- **{c.label}** — {len(self.catalog[c.key])} command"
             f"{'s' if len(self.catalog[c.key]) != 1 else ''} · {c.blurb}"
             for c in self.categories
         ]
