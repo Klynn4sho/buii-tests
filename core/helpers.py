@@ -375,7 +375,7 @@ def _draw_genre_chip(draw: ImageDraw.ImageDraw, x: int, y: int, genre: str, font
 
 
 async def create_music_card(session, title: str, artist: str, cover_url: str,
-                             avg: float = 0.0, count: int = 0, genre: str = None, rank: int = None):
+                             avg: float = 0.0, count: int = 0, genre: str = None, rank: int = None, song_number: int = None):
     cover_bytes = None
     if cover_url:
         try:
@@ -424,6 +424,21 @@ async def create_music_card(session, title: str, artist: str, cover_url: str,
     mask = _rounded_mask((ART, ART), radius=18 * SCALE)
     card.paste(cover, art_box[:2], mask)
     draw.rounded_rectangle(art_box, radius=18 * SCALE, outline=_rgb_to_hex(dominant_rgb), width=2 * SCALE)
+
+    if song_number is not None:
+        id_text = f"ID #{song_number}"
+        id_font = get_font(16 * SCALE, bold=True)
+        id_w = draw.textlength(id_text, font=id_font)
+        id_x = text_right - id_w
+        id_y = art_box[1] + 4 * SCALE
+        draw.rounded_rectangle(
+            [id_x - 10 * SCALE, id_y, text_right + 6 * SCALE, id_y + 28 * SCALE],
+            radius=8 * SCALE,
+            fill="#18191C",
+            outline=_rgb_to_hex(dominant_rgb),
+            width=1 * SCALE,
+        )
+        draw.text((id_x, id_y + 4 * SCALE), id_text, fill="#FFFFFF", font=id_font)
 
     if rank is not None:
         badge_r = 20 * SCALE
