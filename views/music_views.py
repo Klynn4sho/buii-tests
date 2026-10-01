@@ -68,7 +68,7 @@ class PreviewButton(ui.Button):
                 )
                 return
 
-            await interaction.response.defer(ephemeral=True)
+            await interaction.response.defer()
 
             session = getattr(interaction.client, "http_session", None)
             if session is None:
@@ -104,7 +104,6 @@ class PreviewButton(ui.Button):
 
             await interaction.followup.send(
                 file=discord.File(io.BytesIO(data), filename=f"preview-{self.song_id}.mp3"),
-                ephemeral=True,
             )
         except Exception as e:
             print(f"[music] preview failed (song {self.song_id}): {e!r}")
