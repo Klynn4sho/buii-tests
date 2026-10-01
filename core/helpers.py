@@ -172,8 +172,13 @@ async def create_join_card(
     accent = _rgb_to_hex(accent_rgb)
     card = Image.new("RGB", (W, H), bg)
     draw = ImageDraw.Draw(card)
-    draw.rounded_rectangle([12, 12, W - 12, H - 12], radius=24, fill=panel)
-    draw.rectangle([12, 12, 24, H - 12], fill=accent)
+    draw.rounded_rectangle(
+        [12, 12, W - 12, H - 12],
+        radius=24,
+        fill=panel,
+        outline=accent,
+        width=4,
+    )
 
     avatar_size = 180
     avatar = None
