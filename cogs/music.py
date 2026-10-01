@@ -43,7 +43,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             # placeholders) is safe: the already-posted message on Discord's
             # side is untouched, this just re-wires the click handlers.
             self.bot.add_view(RatingView(
-                row["id"],
+                row["guild_id"], row["id"], row["song_number"],
                 url=row["url"],
                 preview_used=bool(row["preview_used"]),
             ))
@@ -65,13 +65,13 @@ class MusicCog(commands.Cog, name="MusicCog"):
         try:
             expired = await database.get_expired_open_songs()
             for row in expired:
-                await database.close_song(row["id"])
+                await database.close_song(row["guild_id"], row["id"])
                 channel = self.bot.get_channel(row["channel_id"]) if row["channel_id"] else None
                 if channel and row["message_id"]:
                     try:
                         message = await channel.fetch_message(row["message_id"])
-                        song = await database.get_song(row["id"])
-                        avg, count = await database.get_song_stats(row["id"])
+                        song = await database.get_song(row["guild_id"], row["id"])
+                        avg, count = await database.get_song_stats(row["guild_id"], row["id"])
                         await message.edit(view=ClosedRatingView(song, avg, count))
                     except Exception:
                         pass
@@ -118,7 +118,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             jump_text = None
             if existing_channel and existing["message_id"]:
                 jump_text = f"https://discord.com/channels/{guild_id}/{existing['channel_id']}/{existing['message_id']}"
-            avg, count = await database.get_song_stats(existing["id"])
+            avg, count = await database.get_song_stats(guild_id, existing["id"])
             desc = f"🔁 **Already Posted**\n{requester.mention}\n\n"
             desc += f"**{existing['title']}**" + (f" by **{existing['artist']}**" if existing['artist'] else "")
             desc += f"\nCurrent rating: ⭐ **{avg:.1f}/10** ({count} votes)"
@@ -130,8 +130,10 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
         genre = await lookup_song_genre(self.bot.http_session, title, artist)
 
-        song_id = await database.add_song(guild_id, channel_id, title, artist, source, url,
-                                           requester.id, str(requester.display_name), cover_url, preview_url, genre)
+        song_ref = await database.add_song(guild_id, channel_id, title, artist, source, url,
+                                       requester.id, str(requester.display_name), cover_url, preview_url, genre)
+        song_id = song_ref["id"]
+        song_number = song_ref["song_number"]
 
         card_bytes, dominant_rgb = await create_music_card(self.bot.http_session, title, artist, cover_url, 0.0, 0, genre=genre)
         file = discord.File(fp=card_bytes, filename="rating_card.png")
@@ -146,12 +148,12 @@ class MusicCog(commands.Cog, name="MusicCog"):
         # inside TextDisplay text still pings normally.
         ping_text = " ".join(mentions)
 
-        view = RatingView(song_id, title=title, artist=artist, requester_name=requester.display_name,
+        view = RatingView(guild_id, song_id, song_number, title=title, artist=artist, requester_name=requester.display_name,
                            preview_url=preview_url, url=url, card_file=file,
                            accent_rgb=dominant_rgb, ping_text=ping_text)
 
         msg = await channel.send(view=view, file=file, allowed_mentions=discord.AllowedMentions(users=True, roles=True))
-        await database.set_song_message_id(song_id, msg.id)
+        await database.set_song_message_id(guild_id, song_id, msg.id)
 
         if lock_time and int(lock_time) > 0 and isinstance(channel, discord.TextChannel):
             self.bot.loop.create_task(self.temp_lock_channel(channel, int(lock_time)))
@@ -180,12 +182,12 @@ class MusicCog(commands.Cog, name="MusicCog"):
     @commands.hybrid_command(name="songratings", aliases=["who-rated", "songvotes"], description="Check individual member ratings for a specific song ID.")
     @has_mod_permission()
     async def songratings(self, ctx: commands.Context, song_id: int):
-        song = await database.get_song(song_id)
+        song = await database.get_song_by_number(ctx.guild.id, song_id)
         if not song:
             await ctx.send(view=notice(f"❌ Song with ID `{song_id}` was not found in the database."), ephemeral=True)
             return
 
-        rows = await database.get_song_ratings_breakdown(song_id)
+        rows = await database.get_song_ratings_breakdown(ctx.guild.id, song["id"])
         if not rows:
             await ctx.send(view=notice(f"❌ No ratings have been recorded for **{song['title']}** (ID: `{song_id}`) yet."), ephemeral=True)
             return
@@ -196,7 +198,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             user_mention = member.mention if member else f"<@{row['user_id']}>"
             lines.append(f"• {user_mention} — Score: **{row['score']}/10**")
 
-        avg, count = await database.get_song_stats(song_id)
+        avg, count = await database.get_song_stats(ctx.guild.id, song["id"])
         artist_str = f" by **{song['artist']}**" if song['artist'] else ""
 
         text = (
@@ -209,7 +211,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
     @commands.hybrid_command(name="closevoting", description="Freeze a song's score so no new votes can be cast.")
     @has_mod_permission()
     async def closevoting(self, ctx: commands.Context, song_id: int):
-        song = await database.get_song(song_id)
+        song = await database.get_song_by_number(ctx.guild.id, song_id)
         if not song:
             await ctx.send(view=notice(f"❌ Song ID `{song_id}` not found."), ephemeral=True)
             return
@@ -217,8 +219,8 @@ class MusicCog(commands.Cog, name="MusicCog"):
             await ctx.send(view=notice(f"⚠️ Song ID `{song_id}` is already closed."), ephemeral=True)
             return
 
-        await database.close_song(song_id)
-        avg, count = await database.get_song_stats(song_id)
+        await database.close_song(ctx.guild.id, song["id"])
+        avg, count = await database.get_song_stats(ctx.guild.id, song["id"])
         artist_str = f" by **{song['artist']}**" if song["artist"] else ""
 
         # Also grey out the live rating buttons on the original message, not
@@ -246,7 +248,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
     @commands.hybrid_command(name="synctoplaylist", description="Manually add a song to the Spotify playlist, regardless of its score.")
     @has_mod_permission()
     async def synctoplaylist(self, ctx: commands.Context, song_id: int):
-        song = await database.get_song(song_id)
+        song = await database.get_song_by_number(ctx.guild.id, song_id)
         if not song:
             await ctx.send(view=notice(f"❌ Song ID `{song_id}` not found."), ephemeral=True)
             return
@@ -260,7 +262,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         await ctx.defer(ephemeral=True)
         success = await sync_to_spotify(self.bot.http_session, song["url"])
         if success:
-            await database.mark_song_synced(song_id)
+            await database.mark_song_synced(ctx.guild.id, song["id"])
             artist_str = f" by **{song['artist']}**" if song["artist"] else ""
             text = (
                 "## ✅ SYNCED TO PLAYLIST\n"
@@ -367,11 +369,18 @@ class MusicCog(commands.Cog, name="MusicCog"):
             title = row["title"] or "Unknown"
             artist = f" — {row['artist']}" if row["artist"] else ""
             elapsed = format_elapsed(row["created_at"])
-            lines.append(f"**{i}. {title}{artist}** (ID: `{row['id']}`) — ⭐ {row['avg_score']:.1f}/10 ({row['votes']} votes) • 🕒 {elapsed}")
+            rank = ["🥇", "🥈", "🥉"][i - 1] if i <= 3 else f"**{i}.**"
+            lines.append(f"{rank} **{title}**{artist} · ID `{row['song_number']}` · ⭐ **{row['avg_score']:.1f}/10** · {row['votes']} votes · {elapsed}")
 
         title_text = "🏆 Top Rated Songs" if min_score == 0.0 else f"🏆 Top Rated Songs (≥ {min_score}/10)"
-        text = f"## {title_text}\n" + "\n".join(lines)
-        await interaction.response.send_message(view=SimpleLayout(text, accent=COLOR_ACCENT))
+        text = (
+            f"## {title_text}\n"
+            f"-# Ranked by average score · minimum **{min_score:.1f}/10** · at least 2 votes\n\n"
+            + "\n".join(lines)
+            + "\n\n"
+            + footer_line("Server Music Leaderboard")
+        )
+        await interaction.response.send_message(view=SimpleLayout(text))
 
     @app_commands.command(name="removesong", description="Removes a song and its votes from the database and Spotify playlist.")
     @app_commands.checks.has_permissions(manage_messages=True)
@@ -380,7 +389,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         await interaction.response.defer()
 
         try:
-            song = await database.get_song(song_id)
+            song = await database.get_song_by_number(interaction.guild.id, song_id)
             if not song:
                 await interaction.followup.send(view=notice(f"❌ Song with ID `{song_id}` was not found in the database."))
                 return
@@ -395,7 +404,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
                         view=notice(f"⚠️ Failed to remove **{title}** from the Spotify playlist — continuing with database deletion.")
                     )
 
-            await database.delete_song(song_id)
+            await database.delete_song(interaction.guild.id, song["id"])
 
             artist_str = f" by **{artist}**" if artist else ""
             await interaction.followup.send(view=notice(f"✅ Successfully removed **{title}**{artist_str} (ID: `{song_id}`) from the database."))
@@ -419,11 +428,11 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
         await confirm_msg.edit(view=notice("⏳ Renumbering songs and repairing rating messages..."))
 
-        mapping = await database.renumber_songs()
+        mapping = await database.renumber_songs(ctx.guild.id)
 
         repaired, failed, unchanged = 0, 0, 0
         for row in mapping:
-            if row["old_id"] == row["new_id"]:
+            if row["old_number"] == row["new_number"]:
                 unchanged += 1
                 continue
             channel = self.bot.get_channel(row["channel_id"]) if row["channel_id"] else None
@@ -432,13 +441,13 @@ class MusicCog(commands.Cog, name="MusicCog"):
                 continue
             try:
                 message = await channel.fetch_message(row["message_id"])
-                song = await database.get_song(row["new_id"])
-                avg, count = await database.get_song_stats(row["new_id"])
+                song = await database.get_song(ctx.guild.id, row["id"])
+                avg, count = await database.get_song_stats(ctx.guild.id, row["id"])
                 if song and song.get("closed"):
                     await message.edit(view=ClosedRatingView(song, avg, count))
                 else:
                     new_view = RatingView(
-                        row["new_id"], title=song["title"] if song else None,
+                        ctx.guild.id, row["id"], row["new_number"], title=song["title"] if song else None,
                         artist=song["artist"] if song else None,
                         requester_name=song["requested_by_name"] if song else None,
                         avg=avg, count=count,
@@ -460,7 +469,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
         result_text = (
             "## ✅ Renumber Complete\n"
-            f"┣ IDs reassigned: **{len(mapping)}**\n"
+            f"┣ Server-local IDs checked: **{len(mapping)}**\n"
             f"┣ Unchanged (already sequential): **{unchanged}**\n"
             f"┣ Rating messages repaired: **{repaired}**\n"
             f"┗ Messages that couldn't be repaired: **{failed}**"
