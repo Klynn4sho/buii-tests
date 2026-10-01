@@ -35,15 +35,10 @@ def _track_text(title: str, artist: str, preview_url: str = None, url: str = Non
         lines.append(ping_text)
     if requester_name:
         lines.append(footer_line(f"Requested by {requester_name}"))
-    title_line = f"**{title or 'Unknown Title'}**"
+    title_line = f"## {title or 'Unknown Title'}"
     if artist:
-        title_line += f" — {artist}"
+        title_line += f"\n-# {artist}"
     lines.append(title_line)
-    link_parts = []
-    if url:
-        link_parts.append(f"[🔗 Source]({url})")
-    if link_parts:
-        lines.append(" • ".join(link_parts))
     return "\n".join(lines)
 
 
@@ -190,6 +185,7 @@ class RatingButton(ui.Button):
             requester_name=song["requested_by_name"], avg=avg, count=count,
             preview_url=song["preview_url"], url=song["url"], card_file=new_file,
             accent_rgb=dominant_rgb, vote_note=f"Your vote: {self.score}/10 — use buttons to change",
+            ping_text=(f"<@{song['requested_by_id']}>" if song.get("requested_by_id") else None),
             preview_used=bool(song.get("preview_used")),
         )
 
@@ -215,7 +211,10 @@ class RatingView(ui.LayoutView):
         if card_file is not None:
             items.append(ui.MediaGallery(discord.MediaGalleryItem(card_file)))
 
-        items.append(ui.ActionRow(PreviewButton(song_id, disabled=preview_used)))
+        link_buttons = [PreviewButton(song_id, disabled=preview_used)]
+        if url:
+            link_buttons.append(ui.Button(label="↗ Source", style=discord.ButtonStyle.link, url=url))
+        items.append(ui.ActionRow(*link_buttons))
         items.append(ui.ActionRow(*(RatingButton(i, song_id) for i in range(1, 6))))
         items.append(ui.ActionRow(*(RatingButton(i, song_id) for i in range(6, 11))))
 
@@ -241,6 +240,11 @@ class ClosedRatingView(ui.LayoutView):
         items = [ui.TextDisplay(_track_text(song.get("title"), song.get("artist"),
                                              song.get("preview_url"), song.get("url")))]
         items.append(ui.MediaGallery(discord.MediaGalleryItem("attachment://rating_card.png")))
+
+        if song.get("url"):
+            items.append(ui.ActionRow(
+                ui.Button(label="↗ Source", style=discord.ButtonStyle.link, url=song["url"])
+            ))
 
         for row_range in (range(1, 6), range(6, 11)):
             items.append(ui.ActionRow(*(
