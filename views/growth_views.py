@@ -31,7 +31,7 @@ async def _notify_error(interaction: discord.Interaction, text: str):
         pass
 
 
-class JoinValueButton(ui.DynamicItem[ui.Button], template=r"join_value\\|(?P<kind>user|inviter|code)\\|(?P<value>[A-Za-z0-9_-]+)"):
+class JoinValueButton(ui.DynamicItem[ui.Button], template=r"join_value\|(?P<kind>user|inviter|code)\|(?P<value>[A-Za-z0-9_-]+)")
     def __init__(self, item, kind, value):
         super().__init__(item)
         self.kind = kind
