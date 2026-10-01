@@ -211,6 +211,9 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
     @commands.hybrid_command(name="testjoin", description="Simulate a member join event to test and preview the join alert layout.")
     @has_mod_permission()
     async def testjoin(self, ctx: commands.Context, account_age_days: int = 2):
+        if ctx.interaction:
+            await ctx.defer()
+
         alert_status = _risk_status(account_age_days)
         maturity_bar = account_maturity_bar(account_age_days)
 
