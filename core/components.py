@@ -4,19 +4,20 @@ Shared Components V2 building blocks (requires discord.py 2.6+).
 Components V2 replaces embeds entirely: a message either uses
 `content`/`embeds`, or a `view=` that's a `discord.ui.LayoutView`, never
 both. There is no per-message "color" or "footer" the way embeds had —
-those are approximated below with an accent-colored Container and a
-small subtext caption line, respectively.
+those are approximated below with a Container's accent color and a small
+subtext caption line, respectively.
 
-Design rule followed in every cog/view: `discord.ui.Container` renders
-with a bordered, accent-colored panel — visually the same "boxed" look an
-embed had. It's used ONLY when a message bundles interactive components
-(buttons/selects) with their explanatory text/media, since the frame
-usefully marks the whole thing as one interactive widget (the dashboard
-panel, the graph range picker, the rating card, a confirm/cancel prompt).
-Everything purely informational — confirmations, leaderboards, stat
-summaries, inspection results — uses bare TextDisplay/Section/MediaGallery
-directly on the LayoutView instead: no border, just cleanly formatted
-rich text.
+Design rule followed in every cog/view: EVERY response is wrapped in a
+`discord.ui.Container` (the bordered "boxed" panel). The container has NO
+accent color by default; an accent is passed explicitly, and only for
+invite- and song-related content (join alerts, /invites, the leaderboards,
+the dashboard, rating cards, song listings). Everything else — help,
+config confirmations, errors, admin output, the staff directory — is a
+plain, un-accented container.
+
+Anything that is just a short one-line reply (an error, a "not found",
+an ephemeral acknowledgement) goes through `notice()` so it is boxed
+like everything else instead of being a bare string.
 """
 
 import discord
@@ -33,33 +34,38 @@ def footer_line(text: str = "Buii Analytics Core") -> str:
     return subtext(f"⚙️ {text} • System Operational")
 
 
-class SimpleLayout(ui.LayoutView):
-    """A borderless layout: one TextDisplay block, no Container. Use for
-    any response that's purely informational (confirmations, summaries,
-    leaderboards, inspection results) — nothing here needs a border."""
-    def __init__(self, content: str):
+class Layout(ui.LayoutView):
+    """The base boxed layout: any number of top-level items (TextDisplay,
+    Section, Separator, MediaGallery...) wrapped in one Container.
+    `accent` is a discord.Color (or None for no accent stripe) — leave it
+    None unless the content is invite- or song-related."""
+    def __init__(self, *items, accent: "discord.Color | None" = None):
         super().__init__(timeout=None)
-        self.add_item(ui.TextDisplay(content))
+        self.container = ui.Container(*items, accent_color=accent)
+        self.add_item(self.container)
 
 
-class SimpleImageLayout(ui.LayoutView):
-    """A borderless layout pairing one text block with one image — used
-    for things like the growth graph, where the image already carries the
-    visual weight and a border around it would just add clutter."""
-    def __init__(self, content: str, file: discord.File):
-        super().__init__(timeout=None)
-        self.add_item(ui.TextDisplay(content))
-        self.add_item(ui.MediaGallery(discord.MediaGalleryItem(file)))
+class SimpleLayout(Layout):
+    """One text block in a container. Use for confirmations, summaries,
+    leaderboards and inspection results."""
+    def __init__(self, content: str, accent: "discord.Color | None" = None):
+        super().__init__(ui.TextDisplay(content), accent=accent)
+
+
+class SimpleImageLayout(Layout):
+    """One text block plus one image in a container — used for things like
+    the staff-directory image."""
+    def __init__(self, content: str, file: discord.File, accent: "discord.Color | None" = None):
+        super().__init__(
+            ui.TextDisplay(content),
+            ui.MediaGallery(discord.MediaGalleryItem(file)),
+            accent=accent,
+        )
         self.file = file
 
 
-class Layout(ui.LayoutView):
-    """Borderless layout built from an arbitrary list of top-level items —
-    the general-purpose version of SimpleLayout/SimpleImageLayout for
-    responses with more structure (Sections, Separators, several text
-    blocks) than a single text string covers. Still no Container: nothing
-    passed to this is interactive, so no border is warranted."""
-    def __init__(self, *items):
-        super().__init__(timeout=None)
-        for item in items:
-            self.add_item(item)
+def notice(text: str) -> SimpleLayout:
+    """A boxed, un-accented one-liner — the replacement for every bare
+    `ctx.send("❌ ...")` / `interaction.response.send_message("...")`
+    string, which can't be a container on their own."""
+    return SimpleLayout(text)

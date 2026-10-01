@@ -6,8 +6,10 @@ there is no disable-a-command-per-guild feature in this bot), so there's
 nothing live to bridge into the bot's loop for. If that changes later (a
 real per-guild command-toggle table), this becomes the seed data for it.
 
-Keep this in sync with cogs/admin.py's COG_DISPLAY grouping by hand; there
-are few enough commands that automatic sync isn't worth the complexity.
+Keep this in sync with the category grouping in views/help_views.py
+(CATEGORIES) by hand; there are few enough commands that automatic sync
+isn't worth the complexity. (The in-Discord /help menu, unlike this file,
+is built live from the bot, so it never needs manual updating.)
 """
 
 COMMANDS = [
@@ -36,7 +38,7 @@ COMMANDS = [
     # --- Staff directory ---
     {"name": "hierarchy", "category": "staff", "description": "Render a staff directory image of every moderation role."},
     # --- Admin ---
-    {"name": "help", "category": "admin", "description": "Show the command directory."},
+    {"name": "help", "category": "admin", "description": "Browse every command by category, with search."},
     {"name": "sync", "category": "admin", "description": "Push slash commands to this server or globally."},
 ]
 

@@ -3,8 +3,8 @@ Components V2 layouts for the invite/growth dashboard: the refresh +
 CSV-export dashboard panel, and the time-range picker attached to /graph.
 
 Both bundle interactive components (buttons/a select menu) with their
-explanatory content, so both use a bordered Container — per the project's
-rule, that's exactly the case a border earns its keep.
+explanatory content inside a Container. They are invite content, so they
+keep the brand accent color (see core/components.py for the accent rule).
 """
 
 import csv
@@ -15,8 +15,20 @@ from discord import ui
 
 from core import database
 from core.config import BYPASS_USER_ID, COLOR_BRAND
-from core.components import footer_line
+from core.components import footer_line, notice
 from core.helpers import build_dashboard_content_items, build_joins_graph_async
+
+
+async def _notify_error(interaction: discord.Interaction, text: str):
+    """Best-effort boxed error reply, whether or not the interaction has
+    already been acknowledged."""
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(view=notice(text), ephemeral=True)
+        else:
+            await interaction.response.send_message(view=notice(text), ephemeral=True)
+    except Exception:
+        pass
 
 
 class DashboardView(ui.LayoutView):
@@ -45,9 +57,13 @@ class DashboardView(ui.LayoutView):
     async def on_refresh(self, interaction: discord.Interaction):
         if not interaction.guild:
             return
-        new_view = await DashboardView.build(interaction.guild)
-        await interaction.response.edit_message(view=new_view)
-        await interaction.followup.send("✅ Dashboard metrics refreshed successfully!", ephemeral=True)
+        try:
+            new_view = await DashboardView.build(interaction.guild)
+            await interaction.response.edit_message(view=new_view)
+            await interaction.followup.send(view=notice("✅ Dashboard metrics refreshed successfully!"), ephemeral=True)
+        except Exception as e:
+            print(f"[growth] dashboard refresh failed: {e!r}")
+            await _notify_error(interaction, "❌ Couldn't refresh the dashboard — try again in a moment.")
 
     async def on_export(self, interaction: discord.Interaction):
         if not interaction.guild:
@@ -56,32 +72,37 @@ class DashboardView(ui.LayoutView):
         is_bypassed = BYPASS_USER_ID is not None and interaction.user.id == BYPASS_USER_ID
 
         if not (is_admin or is_bypassed):
-            await interaction.response.send_message("❌ **Access Denied**: Administrator permissions required.", ephemeral=True)
+            await interaction.response.send_message(
+                view=notice("❌ **Access Denied**: Administrator permissions required."), ephemeral=True
+            )
             return
 
-        await interaction.response.defer(ephemeral=True)
-        rows = await database.async_get_joins_in_range(interaction.guild.id)
+        try:
+            await interaction.response.defer(ephemeral=True)
+            rows = await database.async_get_joins_in_range(interaction.guild.id)
 
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['User ID', 'Username', 'Inviter Name', 'Invite Code', 'Join Date UTC', 'Account Age Days'])
-        writer.writerows(rows)
-        output.seek(0)
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(['User ID', 'Username', 'Inviter Name', 'Invite Code', 'Join Date UTC', 'Account Age Days'])
+            writer.writerows(rows)
+            output.seek(0)
 
-        filename = "tracker_export_all_time.csv"
-        discord_file = discord.File(fp=io.BytesIO(output.getvalue().encode('utf-8')), filename=filename)
-        # A plain followup (no view=) is a normal message, so content + a
-        # file attachment together is fine here — the "no content/embeds"
-        # restriction only applies to messages carrying a LayoutView.
-        await interaction.followup.send(content="📊 Here is your exported join history CSV:", file=discord_file, ephemeral=True)
+            filename = "tracker_export_all_time.csv"
+            discord_file = discord.File(fp=io.BytesIO(output.getvalue().encode('utf-8')), filename=filename)
+            # A plain followup (no view=) is a normal message, so content + a
+            # file attachment together is fine here — the "no content/embeds"
+            # restriction only applies to messages carrying a LayoutView. This
+            # is a raw file delivery, so it stays a plain attachment message.
+            await interaction.followup.send(content="📊 Here is your exported join history CSV:", file=discord_file, ephemeral=True)
+        except Exception as e:
+            print(f"[growth] CSV export failed: {e!r}")
+            await _notify_error(interaction, "❌ Couldn't build the CSV export — try again in a moment.")
 
 
 class GraphView(ui.LayoutView):
     """Built fresh per invocation/range-change via GraphView.build() — the
-    image already carries the visual weight, so this only wraps it in a
-    Container because the select menu (an interactive component) needs to
-    live alongside it; a bare image+text with no border would be the
-    borderless choice if the picker weren't attached."""
+    image already carries the visual weight, and the select menu (an
+    interactive component) lives alongside it in the same container."""
     def __init__(self, days: int, graph_file: discord.File):
         super().__init__(timeout=None)
         self.days = days
@@ -113,12 +134,16 @@ class GraphView(ui.LayoutView):
         return cls(days=days, graph_file=graph_file)
 
     async def on_range_change(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        days = int(self.range_select.values[0])
-        new_view = await GraphView.build(interaction.guild.id, days=days)
-        # edit_original_response goes through the webhook edit endpoint,
-        # which (unlike InteractionResponse.edit_message in some library
-        # versions) reliably accepts a brand-new file upload as an
-        # attachment — needed here since the range change means a whole
-        # new image, not just new text.
-        await interaction.edit_original_response(view=new_view, attachments=[new_view.file])
+        try:
+            await interaction.response.defer()
+            days = int(self.range_select.values[0])
+            new_view = await GraphView.build(interaction.guild.id, days=days)
+            # edit_original_response goes through the webhook edit endpoint,
+            # which (unlike InteractionResponse.edit_message in some library
+            # versions) reliably accepts a brand-new file upload as an
+            # attachment — needed here since the range change means a whole
+            # new image, not just new text.
+            await interaction.edit_original_response(view=new_view, attachments=[new_view.file])
+        except Exception as e:
+            print(f"[growth] graph range change failed: {e!r}")
+            await _notify_error(interaction, "❌ Couldn't update the growth chart — try again in a moment.")

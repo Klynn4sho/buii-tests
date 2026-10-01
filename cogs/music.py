@@ -4,11 +4,11 @@ Pillow rating card, the 1-10 voting flow, Spotify auto-sync, the 12-hour
 auto-close sweep, the music leaderboard (with min-score filter + elapsed
 time), and admin song-management commands.
 
-Every response here is a Components V2 layout, not an embed. Per the
-project's rule (core/components.py): a bordered Container is used only
-where interactive buttons are actually attached (the rating card itself,
-the renumber confirm prompt); every plain confirmation or listing is
-borderless TextDisplay content.
+Every response here is a Components V2 layout inside a Container (see
+core/components.py). Containers carry NO accent by default; an accent is
+set only for song content: the rating card (score / cover color), song
+listings, rating inspection, the duplicate notice. Config confirmations,
+errors and one-line replies are plain, un-accented containers.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -19,9 +19,9 @@ from discord.ext import commands, tasks
 
 from core import database
 from core.checks import has_mod_permission
-from core.config import RATING_WINDOW_HOURS
-from core.components import SimpleLayout, Layout, footer_line
-from core.helpers import create_music_card, format_elapsed
+from core.config import RATING_WINDOW_HOURS, COLOR_ACCENT, COLOR_SUCCESS
+from core.components import SimpleLayout, Layout, footer_line, notice
+from core.helpers import create_music_card, format_elapsed, score_color
 from core.music_utils import (
     find_music_link, fetch_song_metadata, search_song_metadata,
     lookup_song_genre, sync_to_spotify, remove_from_spotify,
@@ -121,7 +121,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             if jump_text:
                 desc += f"\n\n[Jump to the original post]({jump_text})"
             desc += "\n" + footer_line("Duplicate Detection")
-            await channel.send(view=SimpleLayout(desc), allowed_mentions=discord.AllowedMentions(users=True))
+            await channel.send(view=SimpleLayout(desc, accent=COLOR_ACCENT), allowed_mentions=discord.AllowedMentions(users=True))
             return None
 
         genre = await lookup_song_genre(self.bot.http_session, title, artist)
@@ -178,12 +178,12 @@ class MusicCog(commands.Cog, name="MusicCog"):
     async def songratings(self, ctx: commands.Context, song_id: int):
         song = await database.get_song(song_id)
         if not song:
-            await ctx.send(f"❌ Song with ID `{song_id}` was not found in the database.", ephemeral=True)
+            await ctx.send(view=notice(f"❌ Song with ID `{song_id}` was not found in the database."), ephemeral=True)
             return
 
         rows = await database.get_song_ratings_breakdown(song_id)
         if not rows:
-            await ctx.send(f"❌ No ratings have been recorded for **{song['title']}** (ID: `{song_id}`) yet.", ephemeral=True)
+            await ctx.send(view=notice(f"❌ No ratings have been recorded for **{song['title']}** (ID: `{song_id}`) yet."), ephemeral=True)
             return
 
         lines = []
@@ -200,17 +200,17 @@ class MusicCog(commands.Cog, name="MusicCog"):
             f"**Song ID:** `{song_id}` | **Overall:** ⭐ **{avg:.1f}/10** ({count} votes)\n\n"
             + "\n".join(lines) + "\n" + footer_line("Admin Rating Inspector")
         )
-        await ctx.send(view=SimpleLayout(text), ephemeral=True)
+        await ctx.send(view=SimpleLayout(text, accent=discord.Color.from_str(score_color(avg))), ephemeral=True)
 
     @commands.hybrid_command(name="closevoting", description="Freeze a song's score so no new votes can be cast.")
     @has_mod_permission()
     async def closevoting(self, ctx: commands.Context, song_id: int):
         song = await database.get_song(song_id)
         if not song:
-            await ctx.send(f"❌ Song ID `{song_id}` not found.", ephemeral=True)
+            await ctx.send(view=notice(f"❌ Song ID `{song_id}` not found."), ephemeral=True)
             return
         if song.get("closed"):
-            await ctx.send(f"⚠️ Song ID `{song_id}` is already closed.", ephemeral=True)
+            await ctx.send(view=notice(f"⚠️ Song ID `{song_id}` is already closed."), ephemeral=True)
             return
 
         await database.close_song(song_id)
@@ -236,20 +236,21 @@ class MusicCog(commands.Cog, name="MusicCog"):
             "*No further votes will be accepted for this track.*\n"
             + footer_line("Admin Voting Control")
         )
-        await ctx.send(view=SimpleLayout(text))
+        accent = discord.Color.from_str(score_color(avg)) if count > 0 else COLOR_ACCENT
+        await ctx.send(view=SimpleLayout(text, accent=accent))
 
     @commands.hybrid_command(name="synctoplaylist", description="Manually add a song to the Spotify playlist, regardless of its score.")
     @has_mod_permission()
     async def synctoplaylist(self, ctx: commands.Context, song_id: int):
         song = await database.get_song(song_id)
         if not song:
-            await ctx.send(f"❌ Song ID `{song_id}` not found.", ephemeral=True)
+            await ctx.send(view=notice(f"❌ Song ID `{song_id}` not found."), ephemeral=True)
             return
         if not song["url"] or "spotify.com/track/" not in (song["url"] or ""):
-            await ctx.send("❌ This song doesn't have a Spotify track URL — only Spotify-linked tracks can be synced.", ephemeral=True)
+            await ctx.send(view=notice("❌ This song doesn't have a Spotify track URL — only Spotify-linked tracks can be synced."), ephemeral=True)
             return
         if song["synced"]:
-            await ctx.send(f"⚠️ Song ID `{song_id}` is already in the playlist.", ephemeral=True)
+            await ctx.send(view=notice(f"⚠️ Song ID `{song_id}` is already in the playlist."), ephemeral=True)
             return
 
         await ctx.defer(ephemeral=True)
@@ -262,18 +263,18 @@ class MusicCog(commands.Cog, name="MusicCog"):
                 f"**{song['title']}**{artist_str} was manually added to the server Spotify playlist.\n"
                 + footer_line("Manual Spotify Sync")
             )
-            await ctx.send(view=SimpleLayout(text), ephemeral=True)
+            await ctx.send(view=SimpleLayout(text, accent=COLOR_SUCCESS), ephemeral=True)
         else:
             await ctx.send(
-                "❌ Spotify sync failed. Check that `SPOTIFY_USER_TOKEN` and `SPOTIFY_PLAYLIST_ID` are set and the token has the `playlist-modify` scope.",
-                ephemeral=True
+                view=notice("❌ Spotify sync failed. Check that `SPOTIFY_USER_TOKEN` and `SPOTIFY_PLAYLIST_ID` are set and the token has the `playlist-modify` scope."),
+                ephemeral=True,
             )
 
     @commands.hybrid_command(name="myratings", description="View your personal music rating statistics and top picks.")
     async def myratings(self, ctx: commands.Context):
         stats, top_rated = await database.get_user_stats(ctx.guild.id, ctx.author.id)
         if not stats or stats["total"] == 0:
-            await ctx.send("❌ You haven't rated any songs in this server yet!", ephemeral=True)
+            await ctx.send(view=notice("❌ You haven't rated any songs in this server yet!"), ephemeral=True)
             return
 
         avg_score = stats["avg_given"] or 0.0
@@ -293,7 +294,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         text += footer_line("Personal Music Taste Profile")
 
         items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=ctx.author.display_avatar.url))]
-        await ctx.send(view=Layout(*items), ephemeral=True)
+        await ctx.send(view=Layout(*items, accent=COLOR_ACCENT), ephemeral=True)
 
     @commands.hybrid_command(name="setmusicchannel", aliases=["smc"], description="Restrict music link detection to a specific channel, or 'off' to allow any channel.")
     @has_mod_permission()
@@ -320,7 +321,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
     @has_mod_permission()
     async def setmusiclock(self, ctx: commands.Context, seconds: int = 0):
         if seconds < 0:
-            await ctx.send("⚠️ Time cannot be negative.")
+            await ctx.send(view=notice("⚠️ Time cannot be negative."))
             return
         await database.async_set_music_config(ctx.guild.id, lock_time=seconds)
         status = f"Channel will lock for **{seconds} seconds**." if seconds > 0 else "Channel lock disabled."
@@ -335,10 +336,17 @@ class MusicCog(commands.Cog, name="MusicCog"):
     @app_commands.command(name="song", description="Nominate a song by name for rating (no link needed)")
     @app_commands.describe(query="Song name, e.g. 'Artist - Title'")
     async def song_slash(self, interaction: discord.Interaction, query: str):
-        await interaction.response.send_message(f"🔎 Searching for **{query}**...", ephemeral=True)
-        title, artist, cover_url, track_url, preview_url = await search_song_metadata(self.bot.http_session, query)
-        await self.post_song(interaction.channel, "Manual Request", track_url, title or query, artist, interaction.user,
-                              interaction.guild.id if interaction.guild else 0, interaction.channel.id, cover_url, preview_url)
+        await interaction.response.send_message(view=notice(f"🔎 Searching for **{query}**..."), ephemeral=True)
+        try:
+            title, artist, cover_url, track_url, preview_url = await search_song_metadata(self.bot.http_session, query)
+            await self.post_song(interaction.channel, "Manual Request", track_url, title or query, artist, interaction.user,
+                                  interaction.guild.id if interaction.guild else 0, interaction.channel.id, cover_url, preview_url)
+        except Exception as e:
+            print(f"[music] /song failed for query {query!r}: {e!r}")
+            try:
+                await interaction.followup.send(view=notice("❌ Couldn't post that song — try again in a moment."), ephemeral=True)
+            except Exception:
+                pass
 
     @app_commands.command(name="musicleaderboard", description="Show the top rated songs in this server")
     @app_commands.describe(min_score="Only show songs with an average rating at or above this value (0-10)")
@@ -347,7 +355,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         if not rows:
             msg = ("No rated songs yet — post a link or use `/song` to get started!" if min_score == 0.0
                    else f"No songs found with an average rating of **{min_score}/10** or higher.")
-            await interaction.response.send_message(msg, ephemeral=True)
+            await interaction.response.send_message(view=notice(msg), ephemeral=True)
             return
 
         lines = []
@@ -359,7 +367,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
         title_text = "🏆 Top Rated Songs" if min_score == 0.0 else f"🏆 Top Rated Songs (≥ {min_score}/10)"
         text = f"## {title_text}\n" + "\n".join(lines)
-        await interaction.response.send_message(view=SimpleLayout(text))
+        await interaction.response.send_message(view=SimpleLayout(text, accent=COLOR_ACCENT))
 
     @app_commands.command(name="removesong", description="Removes a song and its votes from the database and Spotify playlist.")
     @app_commands.checks.has_permissions(manage_messages=True)
@@ -367,25 +375,32 @@ class MusicCog(commands.Cog, name="MusicCog"):
     async def remove_song(self, interaction: discord.Interaction, song_id: int):
         await interaction.response.defer()
 
-        song = await database.get_song(song_id)
-        if not song:
-            await interaction.followup.send(f"❌ Song with ID `{song_id}` was not found in the database.")
-            return
+        try:
+            song = await database.get_song(song_id)
+            if not song:
+                await interaction.followup.send(view=notice(f"❌ Song with ID `{song_id}` was not found in the database."))
+                return
 
-        title = song["title"] or "Unknown Title"
-        artist = song["artist"]
+            title = song["title"] or "Unknown Title"
+            artist = song["artist"]
 
-        if song["synced"] and song["url"]:
-            removed = await remove_from_spotify(self.bot.http_session, song["url"])
-            if not removed:
-                await interaction.followup.send(
-                    f"⚠️ Failed to remove **{title}** from the Spotify playlist — continuing with database deletion."
-                )
+            if song["synced"] and song["url"]:
+                removed = await remove_from_spotify(self.bot.http_session, song["url"])
+                if not removed:
+                    await interaction.followup.send(
+                        view=notice(f"⚠️ Failed to remove **{title}** from the Spotify playlist — continuing with database deletion.")
+                    )
 
-        await database.delete_song(song_id)
+            await database.delete_song(song_id)
 
-        artist_str = f" by **{artist}**" if artist else ""
-        await interaction.followup.send(f"✅ Successfully removed **{title}**{artist_str} (ID: `{song_id}`) from the database.")
+            artist_str = f" by **{artist}**" if artist else ""
+            await interaction.followup.send(view=notice(f"✅ Successfully removed **{title}**{artist_str} (ID: `{song_id}`) from the database."))
+        except Exception as e:
+            print(f"[music] /removesong failed for id {song_id}: {e!r}")
+            try:
+                await interaction.followup.send(view=notice("❌ Something went wrong removing that song."))
+            except Exception:
+                pass
 
     @commands.hybrid_command(name="renumbersongs", description="Re-sequences song IDs to close gaps left by deletions, and repairs live rating buttons.")
     @commands.has_permissions(administrator=True)
@@ -395,10 +410,10 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
         await view.wait()
         if not view.confirmed:
-            await confirm_msg.edit(view=SimpleLayout("❌ Renumber cancelled."))
+            await confirm_msg.edit(view=notice("❌ Renumber cancelled."))
             return
 
-        await confirm_msg.edit(view=SimpleLayout("⏳ Renumbering songs and repairing rating messages..."))
+        await confirm_msg.edit(view=notice("⏳ Renumbering songs and repairing rating messages..."))
 
         mapping = await database.renumber_songs()
 

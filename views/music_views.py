@@ -4,11 +4,11 @@ grid bundled with the track's title/links/card image, its disabled/closed
 replica shown once voting ends, and the confirmation prompt for the
 admin-only /renumbersongs command.
 
-All three bundle interactive buttons with their explanatory content, so
-all three use a bordered Container — per the project's rule (see
-core/components.py), that's exactly the case a border earns its keep.
-Rating buttons' accent color also does real work here: it's the track's
-score color (or the cover art's dominant color pre-rating), not decoration.
+All three live in a Container (as does every response in the bot — see
+core/components.py). The rating views are song content, so their accent
+color is the track's score color (or the cover art's dominant color
+pre-rating); the renumber prompt keeps its danger-red accent as a
+destructive-action warning.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -18,7 +18,7 @@ from discord import ui
 
 from core import database
 from core.config import RATING_WINDOW_HOURS, COLOR_DANGER
-from core.components import footer_line
+from core.components import footer_line, notice
 from core.helpers import create_music_card, score_color
 from core.music_utils import sync_to_spotify, remove_from_spotify
 
@@ -58,16 +58,31 @@ class RatingButton(ui.Button):
         self.song_id = song_id
 
     async def callback(self, interaction: discord.Interaction):
+        try:
+            await self._vote(interaction)
+        except Exception as e:
+            print(f"[music] vote failed (song {self.song_id}, score {self.score}): {e!r}")
+            try:
+                message = notice("❌ Couldn't register that vote — please try again.")
+                if interaction.response.is_done():
+                    await interaction.followup.send(view=message, ephemeral=True)
+                else:
+                    await interaction.response.send_message(view=message, ephemeral=True)
+            except Exception:
+                pass
+
+    async def _vote(self, interaction: discord.Interaction):
         song = await database.get_song(self.song_id)
 
         if song and song.get("closed"):
-            await interaction.response.send_message("🔒 Voting on this track is closed.", ephemeral=True)
+            await interaction.response.send_message(view=notice("🔒 Voting on this track is closed."), ephemeral=True)
             return
 
         if song and song.get("created_at") and \
                 (datetime.now(timezone.utc) - song["created_at"]) >= timedelta(hours=RATING_WINDOW_HOURS):
             await interaction.response.send_message(
-                f"🔒 Voting closed — this track's {RATING_WINDOW_HOURS}-hour rating window has elapsed.", ephemeral=True
+                view=notice(f"🔒 Voting closed — this track's {RATING_WINDOW_HOURS}-hour rating window has elapsed."),
+                ephemeral=True,
             )
             return
 
@@ -104,7 +119,7 @@ class RatingButton(ui.Button):
         )
 
         await interaction.response.edit_message(view=new_view, attachments=[new_file])
-        await interaction.followup.send(f"You rated this **{self.score}/10** 🎵{sync_alert}", ephemeral=True)
+        await interaction.followup.send(view=notice(f"You rated this **{self.score}/10** 🎵{sync_alert}"), ephemeral=True)
 
 
 class RatingView(ui.LayoutView):
@@ -195,7 +210,7 @@ class RenumberConfirmView(ui.LayoutView):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.invoker_id:
-            await interaction.response.send_message("Only the command invoker can confirm this.", ephemeral=True)
+            await interaction.response.send_message(view=notice("❌ Only the command invoker can confirm this."), ephemeral=True)
             return False
         return True
 

@@ -9,32 +9,41 @@ Every response in this bot is a `discord.ui.LayoutView` — nothing sends
 `discord.Embed` anywhere. This requires **discord.py >= 2.6.0** (Components
 V2 support; current stable is 2.7.x), pinned in `requirements.txt`.
 
-The design rule, defined and explained in `core/components.py`:
-`ui.Container` (the accent-colored, bordered "boxed" look — visually the
-same thing an embed's colored left stripe did) is used **only** where a
-message actually bundles interactive buttons/selects with their
-explanatory content — the dashboard panel, the graph range picker, the
-rating card's 1-10 buttons, the renumber confirm/cancel prompt. Everything
-purely informational — confirmations, leaderboards, stat summaries,
-inspection results, the join-risk alert — is borderless `TextDisplay` /
-`Section` / `MediaGallery` directly on the `LayoutView`, with no
-`Container` at all. Risk/status color that a border used to carry (danger
-red, success green, risk-tier) survives through emoji (🚨/⚠️/🟢, 🟥/🟨/🟩)
-instead, so nothing is silently lost by going borderless.
+The design rule, defined and explained in `core/components.py`: **every
+response is wrapped in a `ui.Container`** (the bordered "boxed" panel), and
+the container has **no accent color by default**. An accent color is set
+explicitly, and only for invite- and song-related content:
 
-`core/components.py` also holds three reusable layout classes so most
-commands don't need a custom `LayoutView` subclass:
-- `SimpleLayout(text)` — one borderless text block.
-- `SimpleImageLayout(text, file)` — one text block + one image, borderless
-  (used by `/graph`'s underlying image and `/hierarchy`).
-- `Layout(*items)` — borderless, for anything needing more than one
-  `TextDisplay`/`Section`/`Separator` (join alerts, `/invites`, `/help`).
+- **Invites:** the join alert and `/testjoin` (red/yellow/green by risk
+  tier), `/leaderboard`, `/invites`, the live dashboard panel, the graph
+  range picker.
+- **Songs:** the rating card (score color, or the cover art's dominant
+  color before the first vote), the closed-voting replica, the song
+  leaderboard, `/songratings`, `/closevoting`, `/myratings`, the duplicate
+  notice, the manual-sync success message. The renumber confirm prompt
+  keeps a danger-red accent as a destructive-action warning.
+
+Everything else — help, config confirmations, errors, admin output, the
+staff directory — is a plain, un-accented container.
+
+`core/components.py` holds the reusable layout classes so most commands
+don't need a custom `LayoutView` subclass:
+- `Layout(*items, accent=None)` — the base: any number of `TextDisplay`/
+  `Section`/`Separator`/`MediaGallery` items inside one container.
+- `SimpleLayout(text, accent=None)` — one text block in a container.
+- `SimpleImageLayout(text, file, accent=None)` — one text block + one image
+  in a container (used by `/hierarchy`).
+- `notice(text)` — a boxed, un-accented one-liner. Use it for every short
+  reply (errors, "not found", ephemeral acknowledgements) instead of a bare
+  string, which can't be a container.
 
 A message sent with Components V2 can **never** combine `content=`/
 `embeds=` with a `view=`. Anywhere the old code relied on a `content=`
 mention to ping a user/role (song posts, duplicate-detection notices), the
 mention now lives as plain text inside a `TextDisplay` — Discord still
-delivers the ping from there, just not from the `content` field.
+delivers the ping from there, just not from the `content` field. The one
+deliberate exception is the dashboard's CSV export, which is a raw file
+delivery and stays a plain attachment message.
 
 ## Layout
 
@@ -43,7 +52,8 @@ main.py                  Process entrypoint only: bot subclass, extension
                           loading, Flask keep-alive server, signal handling
                           and graceful shutdown. No commands/events live here
                           except the two that must be global (on_message's
-                          process_commands dispatch, and the error handlers).
+                          process_commands dispatch, and the error handlers,
+                          which reply with notice() containers).
 
 core/
   config.py               Env vars + color/graph constants. Every other
@@ -62,11 +72,11 @@ core/
                            (including score_color(), used by the rating
                            views to pick the Container's accent color).
   components.py               Shared Components V2 building blocks:
-                           SimpleLayout, SimpleImageLayout, Layout, and
-                           footer_line() (the "-# small text" caption that
-                           replaces embed footers). See the CV2 section
-                           above for the border/no-border design rule this
-                           file documents and every cog/view follows.
+                           Layout, SimpleLayout, SimpleImageLayout, notice(),
+                           and footer_line() (the "-# small text" caption
+                           that replaces embed footers). See the CV2 section
+                           above for the container/accent rule this file
+                           documents and every cog/view follows.
   music_utils.py              Music-link regexes, oEmbed/OG metadata
                            fetching, the Spotify/Deezer/iTunes search
                            cascade, genre lookup, and Spotify playlist
@@ -94,13 +104,33 @@ cogs/
                            /stafflist) renders a PNG of every moderation-
                            permission role, ranked by position, with member
                            avatars and vacancy status per role.
-  admin.py     AdminCog     /help (auto-grouped by cog) and /sync.
+  admin.py     AdminCog     /help (hybrid: prefix + slash, alias `h`),
+                           which opens the HelpView menu, and /sync.
 
 views/
   growth_views.py    DashboardView, GraphRangeSelect, GraphView.
   music_views.py       RatingButton, RatingView, ClosedRatingView,
                      RenumberConfirmView.
+  help_views.py        HelpView (home / category / search pages, category
+                     select, Home/prev/next/Search/Close buttons, Dashboard/
+                     Privacy/Terms link buttons), SearchModal, and the
+                     CATEGORIES table that groups commands by cog name.
 ```
+
+## The help menu
+
+`/help` (or `<prefix>help` / `<prefix>h`) opens a single container, built
+section by section: a home page (greeting, how to use the menu, categories
+with command counts, dashboard setup), per-category pages (6 commands per
+page), and a search page fed by a modal. Only the person who ran it can use
+it, and its controls disable after 3 minutes.
+
+The command list is built live from the bot (prefix commands plus the slash
+tree, de-duplicated by name) and grouped by cog via `CATEGORIES` in
+`views/help_views.py`. A new command shows up automatically; a new cog
+shows up under "📦 Other" until you add a `Category(...)` entry for it
+there. The Dashboard/Privacy/Terms link targets are constants at the top of
+the same file.
 
 ## Why it's split this way
 
@@ -109,12 +139,12 @@ views/
   splitting the DB layer by feature would mean two modules independently
   managing (or fighting over) the same `db_pool` global. Keeping it as one
   module with clearly separated sections is simpler than the alternative.
-- **Views live outside the cogs.** `RatingView`/`DashboardView`/etc. need to
-  be constructible before any cog-specific state exists (they're registered
-  as persistent views in `cog_load()`), and both cogs' commands construct
-  them directly (e.g. `music.py` builds a fresh `RatingView` after
-  `/renumbersongs`). Putting them in their own package avoids circular
-  imports between the two cogs.
+- **Views live outside the cogs.** `RatingView`/`DashboardView`/`HelpView`
+  etc. need to be constructible before any cog-specific state exists (the
+  rating and dashboard views are registered as persistent views in
+  `cog_load()`), and more than one cog may construct them (e.g. `music.py`
+  builds a fresh `RatingView` after `/renumbersongs`). Putting them in
+  their own package avoids circular imports between the cogs.
 - **`core/helpers.py` is intentionally large.** The Pillow card renderer is
   ~200 lines of tightly coupled drawing code (font cache, dominant-color
   extraction, waveform, genre chip, rating gauge) that only makes sense as
@@ -136,6 +166,10 @@ python main.py
    name="YourCog")` and an `async def setup(bot): await
    bot.add_cog(YourCog(bot))` at the bottom.
 2. Add `"cogs.your_feature"` to the `EXTENSIONS` tuple in `main.py`.
-3. If it should show up in `/help` under its own category, add an entry to
-   `COG_DISPLAY` in `cogs/admin.py` — otherwise its commands land under
-   "📦 Other" automatically rather than disappearing.
+3. If it should show up in `/help` under its own category, add a
+   `Category(key, emoji, label, "YourCog", blurb)` entry to `CATEGORIES` in
+   `views/help_views.py` — otherwise its commands land under "📦 Other"
+   automatically rather than disappearing.
+4. Wrap its responses in containers via `core/components.py` (use `notice()`
+   for short replies), and pass an accent color only if the content is
+   invite- or song-related.

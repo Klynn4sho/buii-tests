@@ -4,13 +4,13 @@ new accounts, the live auto-refreshing dashboard panel, growth graphs,
 inviter leaderboard, and the guild config commands (log channel, alert
 role, mod role, prefix).
 
-Every response here is a Components V2 layout, not an embed. Per the
-project's rule (core/components.py), a bordered Container is used only
-where interactive buttons/selects are attached (the dashboard panel, the
-graph range picker); everything else — including the risk-tier join
-alerts — is borderless TextDisplay content. The risk color signal isn't
-lost: it survives via the 🚨/⚠️/🟢 status emoji and the 🟥/🟨/🟩 maturity
-bar, which already carried that meaning even inside the old embed.
+Every response here is a Components V2 layout inside a Container (see
+core/components.py). Containers carry NO accent by default; an accent is
+set only for invite content: the join alert and /testjoin use the risk
+tier color (red/yellow/green, matching the 🚨/⚠️/🟢 status and the
+🟥/🟨/🟩 maturity bar), and /leaderboard, /invites, the dashboard and the
+graph picker use the brand color. Config confirmations and errors are
+plain, un-accented containers.
 """
 
 import asyncio
@@ -23,7 +23,8 @@ from discord.ext import commands, tasks
 
 from core import database
 from core.checks import has_mod_permission
-from core.components import SimpleLayout, Layout, footer_line
+from core.components import SimpleLayout, Layout, footer_line, notice
+from core.config import COLOR_BRAND, COLOR_DANGER, COLOR_WARNING, COLOR_SUCCESS
 from core.helpers import make_bar, account_maturity_bar, build_joins_graph_async
 from views.growth_views import DashboardView, GraphView
 
@@ -34,6 +35,14 @@ def _risk_status(account_age_days: int) -> str:
     elif account_age_days < 30:
         return "⚠️ HIGH RISK (Under 30 Days)"
     return "🟢 LOW RISK (Established User)"
+
+
+def _risk_color(account_age_days: int) -> discord.Color:
+    if account_age_days < 7:
+        return COLOR_DANGER
+    elif account_age_days < 30:
+        return COLOR_WARNING
+    return COLOR_SUCCESS
 
 
 class GrowthCog(commands.Cog, name="GrowthCog"):
@@ -180,7 +189,13 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         )
 
         items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=member.display_avatar.url))]
-        await welcome_channel.send(view=Layout(*items), allowed_mentions=discord.AllowedMentions(roles=True))
+        try:
+            await welcome_channel.send(
+                view=Layout(*items, accent=_risk_color(account_age_days)),
+                allowed_mentions=discord.AllowedMentions(roles=True),
+            )
+        except discord.HTTPException as e:
+            print(f"[growth] couldn't post join alert in guild {guild.id}: {e!r}")
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
@@ -205,7 +220,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         )
 
         items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=ctx.author.display_avatar.url))]
-        await ctx.send(view=Layout(*items))
+        await ctx.send(view=Layout(*items, accent=_risk_color(account_age_days)))
 
     @commands.hybrid_command(name="leaderboard", aliases=["lb"], description="Displays top inviters based on recorded join history.")
     async def leaderboard(self, ctx: commands.Context):
@@ -221,7 +236,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             text += "*No tracked join data available yet.*"
         text += "\n" + footer_line("Leaderboard Metrics")
 
-        await ctx.send(view=SimpleLayout(text))
+        await ctx.send(view=SimpleLayout(text, accent=COLOR_BRAND))
 
     @commands.hybrid_command(name="invites", description="View a member's invite history and stats.")
     async def invites(self, ctx: commands.Context, member: discord.Member = None):
@@ -230,7 +245,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
 
         total_joins = totals["total_joins"] if totals else 0
         if not total_joins:
-            await ctx.send(f"❌ No recorded joins are credited to **{member.display_name}** yet.", ephemeral=True)
+            await ctx.send(view=notice(f"❌ No recorded joins are credited to **{member.display_name}** yet."), ephemeral=True)
             return
 
         flagged_alts = totals["flagged_alts"] or 0
@@ -254,7 +269,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         text += footer_line("Invite Attribution — matched by username at join time")
 
         items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=member.display_avatar.url))]
-        await ctx.send(view=Layout(*items))
+        await ctx.send(view=Layout(*items, accent=COLOR_BRAND))
 
     @commands.hybrid_command(name="statspanel", aliases=["sp"], description="Deploys an auto-refreshing live server growth dashboard.")
     @has_mod_permission()
@@ -314,7 +329,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
     @has_mod_permission()
     async def setprefix(self, ctx: commands.Context, new_prefix: str):
         if len(new_prefix) > 5:
-            await ctx.send("⚠️ Prefix length must be 5 characters or fewer.")
+            await ctx.send(view=notice("⚠️ Prefix length must be 5 characters or fewer."))
             return
         await database.async_set_prefix(ctx.guild.id, new_prefix)
         await ctx.send(view=SimpleLayout(f"🔧 **PREFIX UPDATED**\nServer prefix successfully updated to `{new_prefix}`"))

@@ -32,6 +32,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core import database
+from core.components import notice
 from core.config import BOT_TOKEN, DEFAULT_PREFIX
 
 EXTENSIONS = ("cogs.growth", "cogs.music", "cogs.hierarchy", "cogs.admin")
@@ -147,22 +148,21 @@ async def on_message(message: discord.Message):
 async def on_command_error(ctx: commands.Context, error: commands.CommandError):
     if isinstance(error, commands.CommandNotFound):
         return
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ You don't have permission to use that command.")
-        return
-    if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"⚠️ Missing required argument: `{error.param.name}`.")
-        return
-    if isinstance(error, commands.BadArgument):
-        await ctx.send(f"⚠️ Couldn't understand one of your arguments: {error}")
-        return
-    if isinstance(error, commands.CommandOnCooldown):
-        await ctx.send(f"⏱️ That command is on cooldown. Try again in {error.retry_after:.1f}s.")
-        return
 
-    print(f"Unhandled command error in '{ctx.command}': {error}")
+    if isinstance(error, commands.MissingPermissions):
+        text = "❌ You don't have permission to use that command."
+    elif isinstance(error, commands.MissingRequiredArgument):
+        text = f"⚠️ Missing required argument: `{error.param.name}`."
+    elif isinstance(error, commands.BadArgument):
+        text = f"⚠️ Couldn't understand one of your arguments: {error}"
+    elif isinstance(error, commands.CommandOnCooldown):
+        text = f"⏱️ That command is on cooldown. Try again in {error.retry_after:.1f}s."
+    else:
+        print(f"Unhandled command error in '{ctx.command}': {error}")
+        text = "❌ Something went wrong running that command."
+
     try:
-        await ctx.send("❌ Something went wrong running that command.")
+        await ctx.send(view=notice(text))
     except Exception:
         pass
 
@@ -179,9 +179,9 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
+            await interaction.followup.send(view=notice(message), ephemeral=True)
         else:
-            await interaction.response.send_message(message, ephemeral=True)
+            await interaction.response.send_message(view=notice(message), ephemeral=True)
     except Exception:
         pass
 
