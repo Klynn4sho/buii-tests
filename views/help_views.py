@@ -330,7 +330,7 @@ class HelpView(ui.LayoutView):
 
         home = ui.Button(label="Home", emoji="🏠", style=discord.ButtonStyle.secondary, disabled=not in_list)
         prev = ui.Button(emoji="◀️", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page <= 0))
-        nxt = ui.Button(emoji="▶\ufe0e", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page >= pages - 1))
+        nxt = ui.Button(emoji="▶️", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page >= pages - 1))
         search = ui.Button(label="Search", emoji="🔍", style=discord.ButtonStyle.primary)
         close = ui.Button(label="Close", emoji="✖️", style=discord.ButtonStyle.danger)
 
