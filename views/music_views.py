@@ -67,6 +67,8 @@ class PreviewButton(ui.Button):
                 )
                 return
 
+            await interaction.response.defer(ephemeral=True)
+
             session = getattr(interaction.client, "http_session", None)
             if session is None:
                 raise RuntimeError("HTTP session is unavailable")
@@ -77,7 +79,7 @@ class PreviewButton(ui.Button):
                 data = await response.content.read(10 * 1024 * 1024 + 1)
 
             if len(data) > 10 * 1024 * 1024:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     view=notice("❌ That preview is too large to send."),
                     ephemeral=True,
                 )
@@ -86,7 +88,7 @@ class PreviewButton(ui.Button):
                 raise RuntimeError("preview download was empty")
 
             if not await database.claim_preview(self.song_id):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     view=notice("⚠️ This preview has already been used."),
                     ephemeral=True,
                 )
@@ -96,7 +98,7 @@ class PreviewButton(ui.Button):
             if interaction.message is not None and self.view is not None:
                 await interaction.message.edit(view=self.view)
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 file=discord.File(io.BytesIO(data), filename=f"preview-{self.song_id}.mp3"),
                 ephemeral=True,
             )
