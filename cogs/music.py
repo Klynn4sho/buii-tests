@@ -26,7 +26,7 @@ from core.music_utils import (
     find_music_link, fetch_song_metadata, search_song_metadata,
     lookup_song_genre, sync_to_spotify, remove_from_spotify,
 )
-from views.music_views import RatingView, ClosedRatingView, RenumberConfirmView
+from views.music_views import RatingView, ClosedRatingView, RenumberConfirmView, SongLeaderboardView
 
 
 class MusicCog(commands.Cog, name="MusicCog"):
@@ -72,7 +72,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
                         message = await channel.fetch_message(row["message_id"])
                         song = await database.get_song(row["guild_id"], row["id"])
                         avg, count = await database.get_song_stats(row["guild_id"], row["id"])
-                        await message.edit(view=ClosedRatingView(song, avg, count))
+                        await message.edit(view=ClosedRatingView())
                     except Exception:
                         pass
         except Exception:
@@ -135,7 +135,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         song_id = song_ref["id"]
         song_number = song_ref["song_number"]
 
-        card_bytes, dominant_rgb = await create_music_card(self.bot.http_session, title, artist, cover_url, 0.0, 0, genre=genre)
+        card_bytes, dominant_rgb = await create_music_card(self.bot.http_session, title, artist, cover_url, 0.0, 0, genre=genre, song_number=song_number)
         file = discord.File(fp=card_bytes, filename="rating_card.png")
 
         role_id_str, lock_time, _ = await database.async_get_music_config(guild_id)
@@ -364,23 +364,9 @@ class MusicCog(commands.Cog, name="MusicCog"):
             await interaction.response.send_message(view=notice(msg), ephemeral=True)
             return
 
-        lines = []
-        for i, row in enumerate(rows, start=1):
-            title = row["title"] or "Unknown"
-            artist = f" — {row['artist']}" if row["artist"] else ""
-            elapsed = format_elapsed(row["created_at"])
-            rank = ["🥇", "🥈", "🥉"][i - 1] if i <= 3 else f"**{i}.**"
-            lines.append(f"{rank} **{title}**{artist} · ID `{row['song_number']}` · ⭐ **{row['avg_score']:.1f}/10** · {row['votes']} votes · {elapsed}")
-
-        title_text = "🏆 Top Rated Songs" if min_score == 0.0 else f"🏆 Top Rated Songs (≥ {min_score}/10)"
-        text = (
-            f"## {title_text}\n"
-            f"-# Ranked by average score · minimum **{min_score:.1f}/10** · at least 2 votes\n\n"
-            + "\n".join(lines)
-            + "\n\n"
-            + footer_line("Server Music Leaderboard")
+        await interaction.response.send_message(
+            view=SongLeaderboardView(interaction.guild.id, rows, min_score=min_score)
         )
-        await interaction.response.send_message(view=SimpleLayout(text))
 
     @app_commands.command(name="removesong", description="Removes a song and its votes from the database and Spotify playlist.")
     @app_commands.checks.has_permissions(manage_messages=True)
