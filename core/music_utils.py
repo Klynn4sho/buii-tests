@@ -225,11 +225,16 @@ async def search_spotify(session: aiohttp.ClientSession, query: str):
 
 
 async def search_song_metadata(session: aiohttp.ClientSession, query: str):
+    first_result = None
     for searcher in (search_spotify, search_deezer, search_itunes):
         result = await searcher(session, query)
-        if result:
+        if not result:
+            continue
+        if first_result is None:
+            first_result = result
+        if result[4]:
             return result
-    return None, None, None, None, None
+    return first_result or (None, None, None, None, None)
 
 
 async def sync_to_spotify(session: aiohttp.ClientSession, track_url: str) -> bool:
