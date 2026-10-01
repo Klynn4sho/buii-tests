@@ -263,7 +263,7 @@ class HelpView(ui.LayoutView):
             f"{'s' if len(self.catalog[c.key]) != 1 else ''} · {c.blurb}"
             for c in self.categories
         ]
-        browse = f"### *Browse by category** ({total} commands)\n" + "\n".join(browse_lines)
+        browse = f"### **Browse by category** ({total} commands)\n" + "\n".join(browse_lines)
         setup = (
             "### **Set it up in clicks**\n"
             f"**[Open the dashboard]({DASHBOARD_URL})** — configure the bot visually, no commands needed.\n"
