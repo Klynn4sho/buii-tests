@@ -118,13 +118,15 @@ class AdminCog(commands.Cog, name="AdminCog"):
                 await self.bot.tree.sync(guild=ctx.guild)
                 message = "🧹 **Cleared all guild slash commands!**"
             else:
+                # Keep commands in one scope only. Global commands are visible
+                # everywhere; leaving guild copies behind makes Discord show
+                # duplicate entries in the slash-command picker.
                 synced = await self.bot.tree.sync()
                 self.bot.tree.clear_commands(guild=ctx.guild)
-                self.bot.tree.copy_global_to(guild=ctx.guild)
-                guild_synced = await self.bot.tree.sync(guild=ctx.guild)
+                await self.bot.tree.sync(guild=ctx.guild)
                 message = (
-                    f"⚡ **Synced {len(synced)} global commands and "
-                    f"{len(guild_synced)} commands to this server.**"
+                    f"⚡ **Synced {len(synced)} global commands and removed "
+                    "duplicate server-specific copies.**"
                 )
             if ctx.interaction and ctx.interaction.response.is_done():
                 await ctx.followup.send(view=notice(message), ephemeral=True)
