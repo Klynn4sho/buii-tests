@@ -239,8 +239,7 @@ def _background(w, h):
 
 
 def _row_card(w, h, accent, strength):
-    """One rounded role row: dark base, accent tint fading left->right,
-    accent outline and a left accent bar, all clipped to the rounded shape."""
+    """One rounded dark-glass role row with a restrained accent tint."""
     radius = s(16)
     mask = Image.new("L", (w, h), 0)
     ImageDraw.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=255)
@@ -269,15 +268,15 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     Returns (png_buffer, total_unique_staff_users, vacant_role_count).
     """
     # ---- fonts (shared DejaVu loader — no Windows-only arial.ttf paths)
-    f_title = get_font(s(40), bold=True)
+    f_title = get_font(s(34), bold=True)
     f_tracked_lg = get_font(s(17), bold=True)
     f_tracked_sm = get_font(s(12), bold=True)
     f_cap = get_font(s(14), bold=True)
     f_pill = get_font(s(15), bold=True)
-    f_rank = get_font(s(20), bold=True)
-    f_role = get_font(s(22), bold=True)
+    f_rank = get_font(s(18), bold=True)
+    f_role = get_font(s(19), bold=True)
     f_sub = get_font(s(15), bold=False)
-    f_name = get_font(s(17), bold=True)
+    f_name = get_font(s(16), bold=True)
     f_foot = get_font(s(14), bold=False)
 
     clean_guild_name = clean_display_text(guild.name, "Server")
@@ -296,7 +295,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
         rows.append((role, members, accent_for(role)))
 
     # ---- layout constants (logical px)
-    margin, row_h, pitch, rows_top = 64, 88, 102, 206
+    margin, row_h, pitch, rows_top = 64, 84, 98, 206
     row_w = W - margin * 2
     avatar_d, ring, name_gap, slot_gap = 46, 3, 12, 28
     avatar_start, avail_right = 300, row_w - 28
@@ -419,7 +418,15 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
         rx = margin  # row-local x -> canvas x helper below
         draw.text((s(rx + 30), s(cy)), f"{i + 1:02d}", font=f_rank, fill=accent, anchor="lm")
 
-        name_x = rx + 80
+        # Slim role-color rail mirrors the reference card while keeping
+        # the rank and role title visually separated.
+        rail_x = rx + 68
+        draw.rounded_rectangle(
+            [s(rail_x), s(y + 17), s(rail_x + 6), s(y + row_h - 17)],
+            radius=s(3),
+            fill=accent,
+        )
+        name_x = rx + 92
         if role.icon:
             role_icon = images.get(role.icon.with_size(64).url)
             if role_icon:
@@ -427,7 +434,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
                                     dest=(s(name_x), s(y + 18)))
                 name_x += 34
         raw_role_name = clean_display_text(role.name, "Unnamed role")
-        role_text = _compat_fit(measure, raw_role_name, s(22), True, s(170 - (name_x - (rx + 80))))
+        role_text = _compat_fit(measure, raw_role_name, s(22), True, s(174 - (name_x - (rx + 80))))
         if not role_text.strip("… "):
             role_text = clean_display_text(role.name, "Unnamed role")
         _draw_compat_text(draw, (s(name_x), s(y + 32)), role_text, s(22), True, (255, 255, 255), anchor="lm")
