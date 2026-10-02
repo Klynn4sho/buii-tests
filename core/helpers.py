@@ -254,6 +254,76 @@ async def create_join_card(
     return buf
 
 
+async def create_invite_stats_card(
+    session, avatar_url: str, display_name: str, username: str,
+    total_invites: int, retained: int, left_count: int,
+    flagged_count: int, recent: list,
+):
+    """Render a clean Pillow invite-statistics card."""
+    W, H = 1100, 610
+    bg, panel = "#0F1013", "#1B1D22"
+    white, muted, accent = "#F2F3F5", "#A7ADB7", "#6574F5"
+    card = Image.new("RGB", (W, H), bg)
+    draw = ImageDraw.Draw(card)
+
+    draw.rounded_rectangle([12, 12, W - 12, H - 12], radius=24, fill=panel, outline=accent, width=4)
+
+    avatar_size = 142
+    avatar = None
+    if avatar_url:
+        try:
+            async with session.get(avatar_url, timeout=5) as resp:
+                if resp.status == 200:
+                    avatar = Image.open(io.BytesIO(await resp.read())).convert("RGB").resize(
+                        (avatar_size, avatar_size), Image.LANCZOS
+                    )
+        except Exception:
+            pass
+    if avatar is None:
+        avatar = Image.new("RGB", (avatar_size, avatar_size), "#2B2D31")
+        ImageDraw.Draw(avatar).text((avatar_size // 2 - 16, avatar_size // 2 - 22), "?", fill=muted, font=get_font(42, bold=True))
+    card.paste(avatar, (W - 190, 38), _rounded_mask((avatar_size, avatar_size), 24))
+    draw.rounded_rectangle([W - 190, 38, W - 48, 180], radius=24, outline=accent, width=3)
+
+    title_font = get_font(38, bold=True)
+    draw.text((48, 44), _truncate_to_width(draw, f"{display_name}'s Invite Stats", title_font, 720), fill=white, font=title_font)
+    draw.text((48, 96), f"@{username}", fill=muted, font=get_font(21))
+
+    retention = (retained / total_invites * 100) if total_invites else 0.0
+    metrics = [
+        ("TOTAL INVITES", str(total_invites)),
+        ("STILL IN SERVER", f"{retained} ({retention:.0f}%)"),
+        ("LEFT SINCE JOINING", str(left_count)),
+        ("FLAGGED NEW ACCOUNTS", str(flagged_count)),
+    ]
+    x_positions = [48, 300, 570, 820]
+    for (label, value), x in zip(metrics, x_positions):
+        draw.text((x, 220), label, fill=accent, font=get_font(15, bold=True))
+        draw.text((x, 250), value, fill=white, font=get_font(26, bold=True))
+
+    draw.text((48, 325), "RETENTION", fill=muted, font=get_font(16, bold=True))
+    bar_x, bar_y, bar_w, bar_h = 48, 356, W - 96, 16
+    draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=8, fill="#30333B")
+    if retention > 0:
+        fill_w = max(bar_h, int(bar_w * min(retention, 100) / 100))
+        draw.rounded_rectangle([bar_x, bar_y, bar_x + fill_w, bar_y + bar_h], radius=8, fill=accent)
+
+    draw.text((48, 414), "RECENT INVITEES", fill=accent, font=get_font(16, bold=True))
+    y = 448
+    for row in recent[:4]:
+        flag = "  [new]" if row["account_age_days"] < 7 else ""
+        line = f"• {row['user_name']}{flag}  ·  {row['join_date']}"
+        draw.text((48, y), _truncate_to_width(draw, line, get_font(18), W - 96), fill=white, font=get_font(18))
+        y += 30
+    if not recent:
+        draw.text((48, y), "No recent invitees recorded.", fill=muted, font=get_font(18))
+
+    buf = io.BytesIO()
+    card.save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    return buf
+
+
 # ==========================================================================
 # Pillow dynamic music rating card
 # ==========================================================================
