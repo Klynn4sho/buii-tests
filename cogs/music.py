@@ -57,6 +57,25 @@ class MusicCog(commands.Cog, name="MusicCog"):
             self._ready_once = True
             self.expiry_sweep_loop.start()
 
+    async def sync_qualifying_locked_song(self, guild_id: int, song_id: int):
+        """Sync only songs that finished the normal 12-hour rating window."""
+        song = await database.get_song(guild_id, song_id)
+        if not song or song.get("synced") or not song.get("url"):
+            return False
+
+        created_at = song.get("created_at")
+        if not created_at or datetime.now(timezone.utc) - created_at < timedelta(hours=RATING_WINDOW_HOURS):
+            return False
+
+        average, votes = await database.get_song_stats(guild_id, song_id)
+        if votes <= 4 or average < 7.0:
+            return False
+
+        if await sync_to_spotify(self.bot.http_session, song["url"]):
+            await database.mark_song_synced(guild_id, song_id)
+            return True
+        return False
+
     # ------------------------------------------------------------------
     # Background loop: auto-close any song whose rating window has elapsed
     # ------------------------------------------------------------------
@@ -66,6 +85,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             expired = await database.get_expired_open_songs()
             for row in expired:
                 await database.close_song(row["guild_id"], row["id"])
+                await self.sync_qualifying_locked_song(row["guild_id"], row["id"])
                 channel = self.bot.get_channel(row["channel_id"]) if row["channel_id"] else None
                 if channel and row["message_id"]:
                     try:
@@ -264,7 +284,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         accent = discord.Color.from_str(score_color(avg)) if count > 0 else COLOR_ACCENT
         await ctx.send(view=SimpleLayout(text, accent=accent))
 
-    @commands.hybrid_command(name="synctoplaylist", description="Manually add a song to the Spotify playlist, regardless of its score.")
+    @commands.hybrid_command(name="synctoplaylist", description="Manually add a song to the Spotify playlist.")
     @has_mod_permission()
     async def synctoplaylist(self, ctx: commands.Context, song_id: int):
         song = await database.get_song_by_number(ctx.guild.id, song_id)
