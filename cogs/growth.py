@@ -294,6 +294,8 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
     @commands.hybrid_command(name="statspanel", aliases=["sp"], description="Deploys an auto-refreshing live server growth dashboard.")
     @has_mod_permission()
     async def statspanel(self, ctx: commands.Context):
+        if ctx.interaction:
+            await ctx.defer()
         config = await database.async_get_panel_config(ctx.guild.id)
         if config:
             old_channel_id, old_msg_id = int(config[0]), int(config[1])
@@ -312,6 +314,8 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
     @commands.hybrid_command(name="graph", aliases=["g"], description="Displays daily growth trend charts.")
     @has_mod_permission()
     async def graph(self, ctx: commands.Context, days: int = 30):
+        if ctx.interaction:
+            await ctx.defer()
         view = await GraphView.build(ctx.guild.id, days=days)
         await ctx.send(view=view, file=view.file)
 
