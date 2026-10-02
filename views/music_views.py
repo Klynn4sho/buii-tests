@@ -283,7 +283,7 @@ class SongLeaderboardView(ui.LayoutView):
         self.min_score = min_score
         self.query = query
         self.select = ui.Select(
-            placeholder="Choose a song for details",
+            placeholder="Select a track to view details",
             options=[
                 discord.SelectOption(
                     label=(row["title"] or "Unknown Title")[:100],
@@ -295,7 +295,7 @@ class SongLeaderboardView(ui.LayoutView):
         )
         self.select.callback = self.on_song_selected
 
-        search_button = ui.Button(label="Search songs", style=discord.ButtonStyle.secondary)
+        search_button = ui.Button(label="Search", style=discord.ButtonStyle.secondary)
         search_button.callback = self.on_search
         self.container = ui.Container(
             ui.TextDisplay(self._render_text()),
@@ -305,26 +305,33 @@ class SongLeaderboardView(ui.LayoutView):
         self.add_item(self.container)
 
     def _render_text(self, selected: dict = None) -> str:
-        title = "🏆 Top Rated Songs" if not self.query else f"🔎 Search Results: {self.query}"
+        title = "MUSIC LEADERBOARD" if not self.query else f"SEARCH RESULTS · {self.query}"
+        lines = [
+            f"## {title}",
+            "-# Server rankings · minimum 2 votes per track",
+            "",
+        ]
         if self.min_score:
-            title += f" (≥ {self.min_score:.1f}/10)"
-        lines = [f"## {title}", "-# Ranked songs require at least 2 votes.", ""]
+            lines[1] = f"-# Server rankings · minimum 2 votes · average ≥ {self.min_score:.1f}/10"
+
         if selected:
             artist = f" — {selected['artist']}" if selected.get("artist") else ""
             lines.extend([
-                f"### {selected['title'] or 'Unknown Title'}{artist}",
-                f"**Server Song ID:** `{selected['song_number']}`",
-                f"**Rating:** ⭐ **{float(selected['avg_score']):.1f}/10** · **{selected['votes']} votes**",
-                f"**Posted:** {format_elapsed(selected['created_at'])}",
+                "### SELECTED TRACK",
+                f"**{selected['title'] or 'Unknown Title'}**{artist}",
+                f"ID `{selected['song_number']}`  ·  ⭐ **{float(selected['avg_score']):.1f}/10**  ·  **{selected['votes']} votes**",
+                f"Posted {format_elapsed(selected['created_at'])}",
                 "",
             ])
+
+        lines.append("**RANKINGS**")
         for index, row in enumerate(self.rows, start=1):
-            medal = ["🥇", "🥈", "🥉"][index - 1] if index <= 3 else f"**{index}.**"
             artist = f" — {row['artist']}" if row.get("artist") else ""
+            title = (row['title'] or 'Unknown Title')[:70]
+            rank = f"#{index:02d}"
             lines.append(
-                f"{medal} **{row['title'] or 'Unknown Title'}**{artist} · "
-                f"ID `{row['song_number']}` · ⭐ **{float(row['avg_score']):.1f}/10** · "
-                f"{row['votes']} votes"
+                f"`{rank}` **{title}**{artist}  ·  ID `{row['song_number']}`  ·  "
+                f"⭐ **{float(row['avg_score']):.1f}**  ·  {row['votes']} votes"
             )
         lines.extend(["", footer_line("Server Music Leaderboard")])
         return "\n".join(lines)
