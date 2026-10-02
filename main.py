@@ -22,20 +22,21 @@ Environment Variables:
 
 import asyncio
 import os
+from difflib import get_close_matches
 import signal
 from datetime import datetime, timezone
 from threading import Thread
 
 import aiohttp
 import discord
-from discord import app_commands
+from discord import app_commands, ui
 from discord.ext import commands
 
 from core import database
 from core.components import notice
 from core.config import BOT_TOKEN, DEFAULT_PREFIX
 
-EXTENSIONS = ("cogs.growth", "cogs.music", "cogs.hierarchy", "cogs.admin")
+EXTENSIONS = ("cogs.growth", "cogs.music", "cogs.hierarchy", "cogs.serverinfo", "cogs.admin")
 
 
 # --- Web dashboard (also doubles as the process's keep-alive server on
@@ -149,15 +150,80 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 
+async def _command_prefix_for(message: discord.Message) -> str:
+    value = await bot.get_prefix(message)
+    if isinstance(value, (tuple, list)):
+        return value[0]
+    return value
+
+
+def _command_hint_view(title: str, body: str, run_label: str | None = None,
+                       callback=None) -> ui.LayoutView:
+    view = ui.LayoutView(timeout=90)
+    items = [ui.TextDisplay(f"## {title}\\n{body}")]
+    if run_label and callback:
+        button = ui.Button(label=run_label, style=discord.ButtonStyle.secondary)
+        button.callback = callback
+        items.append(ui.ActionRow(button))
+        view.run_button = button
+    view.add_item(ui.Container(*items))
+    return view
+
+
 @bot.event
 async def on_command_error(ctx: commands.Context, error: commands.CommandError):
     if isinstance(error, commands.CommandNotFound):
+        attempted = getattr(error, "command_name", None) or ctx.invoked_with or "that command"
+        names = [command.name for command in bot.commands if not command.hidden]
+        suggestion = get_close_matches(attempted, names, n=1, cutoff=0.45)
+        if suggestion:
+            target = bot.get_command(suggestion[0])
+            prefix = await _command_prefix_for(ctx.message)
+            label = f"Run {prefix}{suggestion[0]}"
+
+            async def run_suggestion(interaction: discord.Interaction):
+                if interaction.user.id != ctx.author.id:
+                    await interaction.response.send_message(view=notice("❌ This suggestion belongs to the person who ran the command."), ephemeral=True)
+                    return
+                await interaction.response.defer()
+                try:
+                    await ctx.invoke(target)
+                except Exception as invoke_error:
+                    await on_command_error(ctx, invoke_error)
+                view.run_button.disabled = True
+                try:
+                    await interaction.edit_original_response(view=view)
+                except Exception:
+                    pass
+
+            view = _command_hint_view(
+                f"Command `{attempted}` does not exist",
+                f"Did you mean `{prefix}{suggestion[0]}`? · Try `{prefix}help` to see everything.",
+                label,
+                run_suggestion,
+            )
+        else:
+            prefix = await _command_prefix_for(ctx.message)
+            view = _command_hint_view(
+                f"Command `{attempted}` does not exist",
+                f"Try `{prefix}help` to see every available command.",
+            )
+        await ctx.send(view=view)
+        return
+
+    if isinstance(error, commands.MissingRequiredArgument):
+        command = ctx.command
+        prefix = await _command_prefix_for(ctx.message)
+        signature = command.signature or f"<{error.param.name}>"
+        body = (
+            f"{command.description or command.short_doc or 'View command details.'}\\n"
+            f"-# Syntax: `{prefix}{command.qualified_name} {signature}` | `/{command.qualified_name} {signature}`"
+        )
+        await ctx.send(view=_command_hint_view(command.qualified_name, body))
         return
 
     if isinstance(error, commands.MissingPermissions):
         text = "❌ You don't have permission to use that command."
-    elif isinstance(error, commands.MissingRequiredArgument):
-        text = f"⚠️ Missing required argument: `{error.param.name}`."
     elif isinstance(error, commands.BadArgument):
         text = f"⚠️ Couldn't understand one of your arguments: {error}"
     elif isinstance(error, commands.CommandOnCooldown):
