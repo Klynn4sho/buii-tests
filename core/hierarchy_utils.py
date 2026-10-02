@@ -13,7 +13,7 @@ import unicodedata
 from datetime import datetime, timezone
 
 import discord
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 import matplotlib.font_manager as fm
 
 from core.config import MODERATION_PERMISSIONS, HIERARCHY_IGNORED_ROLE_NAMES
