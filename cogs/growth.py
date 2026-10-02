@@ -363,7 +363,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         join_detail = f'{join_age} days old at join' if join_age is not None else 'No join record'
 
         header = ui.Section(
-            ui.TextDisplay(f'## **{display_name}**\n-# <@{user_id}> · @{target_name}'),
+            ui.TextDisplay(f'## **<@{user_id}>**\n-# `@{target_name}` · ID `{user_id}`'),
             accessory=ui.Thumbnail(media=avatar_url),
         )
         summary = ui.TextDisplay(
@@ -379,8 +379,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             f'-# {join_detail}'
         )
         details = ui.TextDisplay(
-            f'**Roles**\n{role_text}\n\n'
-            f'**User ID**  ·  `{user_id}`'
+            f'**Roles**\n{role_text}'
         )
         items = [
             header,
