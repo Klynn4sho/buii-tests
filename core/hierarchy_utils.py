@@ -269,10 +269,10 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     """
     # ---- fonts (shared DejaVu loader — no Windows-only arial.ttf paths)
     f_title = get_font(s(34), bold=True)
-    f_tracked_lg = get_font(s(17), bold=True)
-    f_tracked_sm = get_font(s(12), bold=True)
+    f_tracked_lg = get_font(s(15), bold=True)
+    f_tracked_sm = get_font(s(10), bold=True)
     f_cap = get_font(s(14), bold=True)
-    f_pill = get_font(s(15), bold=True)
+    f_pill = get_font(s(13), bold=True)
     f_rank = get_font(s(18), bold=True)
     f_role = get_font(s(19), bold=True)
     f_sub = get_font(s(15), bold=False)
@@ -287,7 +287,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     # ---- gather rows + stats
     rows, staff_ids, vacant = [], set(), 0
     for role in staff_roles:
-        members = [m for m in role.members if not m.bot]
+        members = list(role.members)
         if members:
             staff_ids.update(m.id for m in members)
         else:
@@ -400,11 +400,13 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
 
     heading = "SERVER HIERARCHY"
     heading_w = _tracked_width(measure, heading, f_tracked_lg, s(5)) / SCALE
-    _tracked_text(draw, s(pill_x0 - 28 - heading_w), s(pill_cy), heading, f_tracked_lg, (197, 246, 240), s(5))
+    heading_x = max(title_x + title_w + 34, pill_x0 - 28 - heading_w)
+    _tracked_text(draw, s(heading_x), s(pill_cy), heading, f_tracked_lg, (197, 246, 240), s(4))
 
     tagline = "ROLES  ·  PEOPLE  ·  STRUCTURE"
-    tag_w = _tracked_width(measure, tagline, f_tracked_sm, s(4)) / SCALE
-    _tracked_text(draw, s(W - margin - tag_w), s(128), tagline, f_tracked_sm, (86, 88, 100), s(4))
+    tag_w = _tracked_width(measure, tagline, f_tracked_sm, s(3)) / SCALE
+    tag_x = max(margin + 420, W - margin - tag_w)
+    _tracked_text(draw, s(tag_x), s(128), tagline, f_tracked_sm, (86, 112, 116), s(3))
 
     # ---- role rows
     for i, ((role, members, accent), (visible, overflow, end_x)) in enumerate(zip(rows, plans)):
@@ -444,7 +446,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
             sub_color = tuple(int(c * 0.85 + 30 * 0.15) for c in accent) if role.color.value != 0 else (140, 143, 158)
         else:
             sub, sub_color = "Vacant", (255, 95, 95)
-        draw.text((s(rx + 80), s(y + 62)), sub, font=f_sub, fill=sub_color, anchor="lm")
+        draw.text((s(name_x), s(y + 62)), sub, font=f_sub, fill=sub_color, anchor="lm")
 
         for m, name, x in visible:
             ax = rx + x
