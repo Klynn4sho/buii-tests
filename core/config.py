@@ -37,6 +37,7 @@ DEFAULT_PREFIX = os.environ.get("COMMAND_PREFIX", "b,")
 SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET")
 SPOTIFY_USER_TOKEN = os.environ.get("SPOTIFY_USER_TOKEN")
+SPOTIFY_REFRESH_TOKEN = os.environ.get("SPOTIFY_REFRESH_TOKEN")
 SPOTIFY_PLAYLIST_ID = os.environ.get("SPOTIFY_PLAYLIST_ID")
 
 # --- Discord embed palette ---
