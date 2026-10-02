@@ -382,8 +382,12 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
         draw.text((s(icon_x + icon_d / 2), s(icon_y + icon_d / 2)), (clean_guild_name[:1] or "?").upper(),
                   font=f_title, fill=(225, 255, 251), anchor="mm")
 
+    heading = "SERVER HIERARCHY"
+    heading_w = _tracked_width(measure, heading, f_tracked_lg, s(5)) / SCALE
+    heading_x = pill_x0 - 28 - heading_w
+
     title_x = icon_x + icon_d + 24
-    title_max = (pill_x0 - 330) - title_x        # leave room for the right-hand title
+    title_max = heading_x - 34 - title_x
     title_text = _compat_fit(
         measure,
         clean_guild_name,
@@ -401,11 +405,11 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
         draw.text((s(x0 + pill_pad + dot_d + dot_gap), s(pill_cy)), text, font=f_pill,
                   fill=(236, 237, 243), anchor="lm")
 
-    heading = "SERVER HIERARCHY"
-    heading_w = _tracked_width(measure, heading, f_tracked_lg, s(5)) / SCALE
-    heading_x = max(title_x + title_w + 34, pill_x0 - 28 - heading_w)
     _tracked_text(draw, s(heading_x), s(pill_cy), heading, f_tracked_lg, (197, 246, 240), s(4))
 
+    tagline = "ROLES  ·  PEOPLE  ·  STRUCTURE"
+    tag_w = _tracked_width(measure, tagline, f_tracked_sm, s(3)) / SCALE
+    tag_x = W - margin - tag_w
     tagline = "ROLES  ·  PEOPLE  ·  STRUCTURE"
     tag_w = _tracked_width(measure, tagline, f_tracked_sm, s(3)) / SCALE
     tag_x = max(margin + 420, W - margin - tag_w)
