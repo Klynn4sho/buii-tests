@@ -14,7 +14,7 @@ from core import database
 from core.components import notice, SimpleLayout
 from core.config import (
     DEFAULT_PREFIX, BYPASS_USER_ID, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET,
-    SPOTIFY_REFRESH_TOKEN, SPOTIFY_PLAYLIST_ID,
+    SPOTIFY_REFRESH_TOKEN, SPOTIFY_PLAYLIST_ID, DB_POOL_MIN, DB_POOL_MAX,
 )
 from views.help_views import HelpView
 
@@ -85,6 +85,23 @@ class AdminCog(commands.Cog, name="AdminCog"):
             f"**HTTP session**  ·  {'✅ ready' if session and not session.closed else '❌ unavailable'}\n"
             f"**Spotify configuration**  ·  {'✅ complete' if spotify_ready else '⚠️ incomplete'}\n\n"
             + "Use this panel to verify deployment health without exposing secrets."
+        )
+        await ctx.send(view=SimpleLayout(text), ephemeral=bool(ctx.interaction))
+
+
+    @commands.hybrid_command(name="storage", aliases=["dbstatus"], description="Show private persistent-storage status (owner bypass only).")
+    async def storage(self, ctx: commands.Context):
+        if not BYPASS_USER_ID or ctx.author.id != BYPASS_USER_ID:
+            await ctx.send(view=notice("❌ This storage command is restricted."), ephemeral=bool(ctx.interaction))
+            return
+        healthy = await database.async_check_db_health()
+        pool_state = "ready" if database.db_pool is not None else "not initialized"
+        text = (
+            "## PERSISTENT STORAGE\n"
+            f"**Database** · {'✅ healthy' if healthy else '❌ unavailable'}\n"
+            f"**Connection pool** · {pool_state} · `{DB_POOL_MIN}–{DB_POOL_MAX}` connections\n"
+            "**Records** · joins, leaves, member snapshots, ratings, and Spotify sync flags\n"
+            "-# This panel is visible only to the configured bypass user."
         )
         await ctx.send(view=SimpleLayout(text), ephemeral=bool(ctx.interaction))
 
