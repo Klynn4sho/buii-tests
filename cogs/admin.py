@@ -44,12 +44,18 @@ class AdminCog(commands.Cog, name="AdminCog"):
                 await ctx.send(view=notice("🧹 **Cleared all guild slash commands!**"))
             elif option == "global":
                 synced = await self.bot.tree.sync()
-                await ctx.send(view=notice(f"🌐 **Synced {len(synced)} commands globally!**"))
-            else:
                 self.bot.tree.clear_commands(guild=ctx.guild)
-                self.bot.tree.copy_global_to(guild=ctx.guild)
-                synced = await self.bot.tree.sync(guild=ctx.guild)
-                await ctx.send(view=notice(f"⚡ **Clean-synced {len(synced)} Slash Commands to this server without duplication!**"))
+                await self.bot.tree.sync(guild=ctx.guild)
+                await ctx.send(view=notice(
+                    f"🌐 **Synced {len(synced)} commands globally and removed duplicate guild copies!**"
+                ))
+            else:
+                synced = await self.bot.tree.sync()
+                self.bot.tree.clear_commands(guild=ctx.guild)
+                await self.bot.tree.sync(guild=ctx.guild)
+                await ctx.send(view=notice(
+                    f"⚡ **Synced {len(synced)} global commands and cleaned this server's duplicate copies!**"
+                ))
         except discord.HTTPException as e:
             print(f"[sync] failed: {e!r}")
             await ctx.send(view=notice("❌ Discord rejected the sync request — you may be rate-limited. Try again shortly."))
