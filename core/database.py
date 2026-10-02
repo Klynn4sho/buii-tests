@@ -132,14 +132,22 @@ def _raw_init_music_db():
         cursor.execute('ALTER TABLE songs ADD COLUMN IF NOT EXISTS preview_used INTEGER DEFAULT 0;')
         cursor.execute('ALTER TABLE songs ADD COLUMN IF NOT EXISTS song_number INTEGER;')
         cursor.execute('''
-            UPDATE songs s
-            SET song_number = numbered.song_number
-            FROM (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY guild_id ORDER BY id) AS song_number
+            WITH missing AS (
+                SELECT id, guild_id,
+                       ROW_NUMBER() OVER (PARTITION BY guild_id ORDER BY id) AS row_offset
                 FROM songs
                 WHERE song_number IS NULL
-            ) AS numbered
-            WHERE s.id = numbered.id;
+            ),
+            current_max AS (
+                SELECT guild_id, COALESCE(MAX(song_number), 0) AS max_number
+                FROM songs
+                GROUP BY guild_id
+            )
+            UPDATE songs s
+            SET song_number = current_max.max_number + missing.row_offset
+            FROM missing
+            JOIN current_max ON current_max.guild_id = missing.guild_id
+            WHERE s.id = missing.id;
         ''')
         cursor.execute('''
             CREATE UNIQUE INDEX IF NOT EXISTS songs_guild_song_number_idx
@@ -610,12 +618,39 @@ async def async_get_inviter_stats(guild_id, inviter_name, recent_limit=10):
 def _raw_add_song(guild_id, channel_id, title, artist, source, url, requester_id, requester_name, cover_url, preview_url, genre=None):
     conn = get_db_conn()
     try:
-        cursor = conn.cursor()
-        # Serialize numbering per guild so simultaneous song posts cannot
-        # receive the same public ID.
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        # Serialize duplicate detection and per-server numbering in one
+        # transaction so simultaneous posts cannot create duplicate rows.
         cursor.execute("SELECT pg_advisory_xact_lock(%s);", (int(guild_id),))
-        cursor.execute("SELECT COALESCE(MAX(song_number), 0) + 1 FROM songs WHERE guild_id = %s;", (guild_id,))
-        song_number = cursor.fetchone()[0]
+
+        if url:
+            cursor.execute('''
+                SELECT * FROM songs
+                WHERE guild_id = %s AND url = %s
+                ORDER BY id DESC LIMIT 1;
+            ''', (guild_id, url))
+            existing = cursor.fetchone()
+        else:
+            existing = None
+
+        if not existing and title:
+            cursor.execute('''
+                SELECT * FROM songs
+                WHERE guild_id = %s
+                  AND LOWER(title) = LOWER(%s)
+                  AND (artist IS NOT DISTINCT FROM %s
+                       OR LOWER(COALESCE(artist, '')) = LOWER(COALESCE(%s, '')))
+                ORDER BY id DESC LIMIT 1;
+            ''', (guild_id, title, artist, artist))
+            existing = cursor.fetchone()
+
+        if existing:
+            conn.commit()
+            cursor.close()
+            return {"existing": dict(existing)}
+
+        cursor.execute("SELECT COALESCE(MAX(song_number), 0) + 1 AS next_number FROM songs WHERE guild_id = %s;", (guild_id,))
+        song_number = cursor.fetchone()["next_number"]
         cursor.execute('''
             INSERT INTO songs (guild_id, song_number, channel_id, message_id, title, artist, source, url, cover_url, preview_url,
                                 requested_by_id, requested_by_name, synced, genre)
@@ -626,7 +661,10 @@ def _raw_add_song(guild_id, channel_id, title, artist, source, url, requester_id
         row = cursor.fetchone()
         conn.commit()
         cursor.close()
-        return {"id": row[0], "song_number": row[1]}
+        return {"id": row["id"], "song_number": row["song_number"]}
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         release_db_conn(conn)
 
