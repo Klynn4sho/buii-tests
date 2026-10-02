@@ -85,6 +85,32 @@ class MusicCog(commands.Cog, name="MusicCog"):
     # ------------------------------------------------------------------
     # Song posting
     # ------------------------------------------------------------------
+    async def send_duplicate_notice(self, channel, guild_id: int, requester, existing: dict):
+        existing_channel = channel.guild.get_channel(existing["channel_id"]) if channel.guild else None
+        jump_url = None
+        if existing_channel and existing["message_id"]:
+            jump_url = f"https://discord.com/channels/{guild_id}/{existing['channel_id']}/{existing['message_id']}"
+
+        avg, count = await database.get_song_stats(guild_id, existing["id"])
+        title = existing["title"] or "Unknown title"
+        artist = f" — {existing['artist']}" if existing.get("artist") else ""
+        text = (
+            "## Already posted\n"
+            f"{requester.mention}\n"
+            f"**{title}**{artist}\n"
+            f"⭐ **{avg:.1f}/10** · {count} votes"
+        )
+        items = [ui.TextDisplay(text)]
+        if jump_url:
+            items.append(ui.ActionRow(
+                ui.Button(label="View original post", style=discord.ButtonStyle.link, url=jump_url)
+            ))
+        items.append(ui.TextDisplay(footer_line("Duplicate detected")))
+        await channel.send(
+            view=Layout(*items),
+            allowed_mentions=discord.AllowedMentions(users=True),
+        )
+
     async def temp_lock_channel(self, channel: discord.TextChannel, duration: int):
         try:
             overwrite = channel.overwrites_for(channel.guild.default_role)
@@ -114,24 +140,17 @@ class MusicCog(commands.Cog, name="MusicCog"):
         # creating a second entry that would split votes across two rows.
         existing = await database.find_duplicate_song(guild_id, url, title, artist)
         if existing:
-            existing_channel = channel.guild.get_channel(existing["channel_id"]) if channel.guild else None
-            jump_text = None
-            if existing_channel and existing["message_id"]:
-                jump_text = f"https://discord.com/channels/{guild_id}/{existing['channel_id']}/{existing['message_id']}"
-            avg, count = await database.get_song_stats(guild_id, existing["id"])
-            desc = f"🔁 **Already Posted**\n{requester.mention}\n\n"
-            desc += f"**{existing['title']}**" + (f" by **{existing['artist']}**" if existing['artist'] else "")
-            desc += f"\nCurrent rating: ⭐ **{avg:.1f}/10** ({count} votes)"
-            if jump_text:
-                desc += f"\n\n[Jump to the original post]({jump_text})"
-            desc += "\n" + footer_line("Duplicate Detection")
-            await channel.send(view=SimpleLayout(desc, accent=COLOR_ACCENT), allowed_mentions=discord.AllowedMentions(users=True))
+            await self.send_duplicate_notice(channel, guild_id, requester, existing)
             return None
 
         genre = await lookup_song_genre(self.bot.http_session, title, artist)
 
         song_ref = await database.add_song(guild_id, channel_id, title, artist, source, url,
                                        requester.id, str(requester.display_name), cover_url, preview_url, genre)
+        if song_ref.get("existing"):
+            await self.send_duplicate_notice(channel, guild_id, requester, song_ref["existing"])
+            return None
+
         song_id = song_ref["id"]
         song_number = song_ref["song_number"]
 
