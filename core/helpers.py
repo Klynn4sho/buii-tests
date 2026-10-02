@@ -22,6 +22,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor
 
 from core import database
 from core.config import GRAPH_BG, GRAPH_GRID, GRAPH_TEXT, GRAPH_ACCENT, GRAPH_FILL
+from matplotlib.ticker import MaxNLocator
 from core.components import footer_line
 
 
@@ -70,21 +71,19 @@ async def build_dashboard_content_items(guild: discord.Guild) -> list:
     the old async_build_dashboard_embed was a pure data-to-embed function."""
     total, day_count, risk_count, codes = await database.async_compile_dashboard_stats(guild.id)
 
-    risk_bar = make_bar(risk_count, max(total, 1), length=8, filled_char="🟥", empty_char="⬛")
+    risk_bar = make_bar(risk_count, max(total, 1), length=8, filled_char="#", empty_char="-")
 
     code_lines = []
     if codes:
-        medals = ["🥇", "🥈", "🥉"]
-        for idx, (code, count) in enumerate(codes):
-            medal = medals[idx] if idx < 3 else "🔹"
-            code_lines.append(f"{medal} Code `{code}` — **{count} clicks**")
+        for idx, (code, count) in enumerate(codes, start=1):
+            code_lines.append(f"**{idx:02d}.** Code `{code}` · **{count}** click{'s' if count != 1 else ''}")
         code_text = "\n".join(code_lines)
     else:
         code_text = "*No custom invite links tracked yet.*"
 
     header = ui.TextDisplay(
-        "# 📊 LIVE GROWTH & ANALYTICS DASHBOARD\n"
-        "`⚡ LIVE MONITOR` • *Auto-refreshes every 60 minutes*"
+        "# LIVE GROWTH & ANALYTICS DASHBOARD\n"
+        "`LIVE MONITOR` · *Auto-refreshes every 60 minutes*"
     )
 
     if guild.icon:
@@ -133,6 +132,7 @@ async def build_joins_graph_async(guild_id, days=30):
         ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=8))
 
         ax.tick_params(colors=GRAPH_TEXT, labelsize=8.5)
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         ax.grid(axis="y", color=GRAPH_GRID, linestyle="--", alpha=0.5, linewidth=0.7)
         ax.set_axisbelow(True)
 
