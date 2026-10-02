@@ -22,7 +22,7 @@ from core import database
 from core.config import RATING_WINDOW_HOURS, COLOR_DANGER
 from core.components import footer_line, notice
 from core.helpers import create_music_card, score_color, format_elapsed
-from core.music_utils import sync_to_spotify, remove_from_spotify
+from core.music_utils import remove_from_spotify
 
 
 def _track_text(title: str, artist: str, preview_url: str = None, url: str = None,
@@ -180,15 +180,6 @@ class RatingButton(ui.Button):
         song = await database.get_song(self.guild_id, self.song_id)  # re-fetch so synced/closed reflect the latest DB state
 
         sync_alert = ""
-        if song["url"]:
-            if avg >= 6.0 and not song["synced"]:
-                if await sync_to_spotify(bot.http_session, song["url"]):
-                    await database.mark_song_synced(self.guild_id, self.song_id)
-                    sync_alert = "\n✅ *Track crossed 6.0 average and was added to the server Spotify playlist!*"
-            elif avg < 6.0 and song["synced"]:
-                if await remove_from_spotify(bot.http_session, song["url"]):
-                    await database.unmark_song_synced(self.guild_id, self.song_id)
-                    sync_alert = "\n⚠️ *Track dropped below 6.0 average and was removed from the server Spotify playlist.*"
 
         card_bytes, dominant_rgb = await create_music_card(bot.http_session, song["title"], song["artist"], song["cover_url"],
                                                              avg, count, genre=song["genre"], song_number=song["song_number"])
