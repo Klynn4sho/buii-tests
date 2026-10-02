@@ -300,8 +300,10 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     for role, members, accent in rows:
         visible, x = [], avatar_start
         for i, m in enumerate(members):
-            readable_name = clean_display_text(m.display_name, "") or clean_display_text(m.name, "Member")
-            name = _fit(measure, readable_name, f_name, s(150))
+            raw_name = unicodedata.normalize("NFKC", m.display_name or "")
+            name = _compat_fit(measure, raw_name, s(17), True, s(150))
+            if not name.strip("… "):
+                name = clean_display_text(m.name, "Member")
             tw = measure.textlength(name, font=f_name) / SCALE
             w = avatar_d + name_gap + tw
             reserve = overflow_w if len(members) - i - 1 > 0 else 0
@@ -367,7 +369,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
 
     title_x = icon_x + icon_d + 24
     title_max = (pill_x0 - 330) - title_x        # leave room for the right-hand title
-    _draw_compat_text(draw, (s(title_x), s(88)), clean_guild_name, s(40), True, (255, 255, 255), anchor="lm")
+    _draw_compat_text(draw, (s(title_x), s(88)), unicodedata.normalize("NFKC", guild.name or "Server"), s(40), True, (255, 255, 255), anchor="lm")
     _tracked_text(draw, s(title_x), s(126), "STAFF DIRECTORY", f_cap, MUTED, s(4))
 
     for (rgb, text), x0, width in zip(pills, pill_positions, pill_widths):
@@ -403,7 +405,10 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
                 img.alpha_composite(role_icon.resize((s(26), s(26)), Image.LANCZOS),
                                     dest=(s(name_x), s(y + 18)))
                 name_x += 34
-        role_text = _compat_fit(measure, clean_display_text(role.name, "Unnamed role"), s(22), True, s(170 - (name_x - (rx + 80))))
+        raw_role_name = unicodedata.normalize("NFKC", role.name or "")
+        role_text = _compat_fit(measure, raw_role_name, s(22), True, s(170 - (name_x - (rx + 80))))
+        if not role_text.strip("… "):
+            role_text = clean_display_text(role.name, "Unnamed role")
         _draw_compat_text(draw, (s(name_x), s(y + 32)), role_text, s(22), True, (255, 255, 255), anchor="lm")
 
         if members:
