@@ -231,7 +231,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             if channel:
                 try:
                     message = await channel.fetch_message(song["message_id"])
-                    await message.edit(view=ClosedRatingView(song, avg, count))
+                    await message.edit(view=ClosedRatingView())
                 except Exception:
                     pass
 
