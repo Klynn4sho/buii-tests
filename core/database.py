@@ -400,6 +400,31 @@ async def async_get_member_invite_summary(guild_id, user_id, inviter_names):
     )
 
 
+def _raw_get_member_history(guild_id, user_id, limit=20):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute('''
+            SELECT 'join' AS event_type, join_date AS event_date,
+                   inviter_name, invite_code, account_age_days
+            FROM joins WHERE guild_id = %s AND user_id = %s
+            UNION ALL
+            SELECT 'leave' AS event_type, leave_date AS event_date,
+                   NULL, NULL, NULL
+            FROM leaves WHERE guild_id = %s AND user_id = %s
+            ORDER BY event_date DESC LIMIT %s;
+        ''', (str(guild_id), str(user_id), str(guild_id), str(user_id), limit))
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    finally:
+        release_db_conn(conn)
+
+
+async def async_get_member_history(guild_id, user_id, limit=20):
+    return await asyncio.to_thread(_raw_get_member_history, guild_id, user_id, limit)
+
+
 # ==========================================================================
 # Guild config: log channel / alert role / mod role / prefix / panel / music
 # ==========================================================================
