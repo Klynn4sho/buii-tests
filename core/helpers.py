@@ -140,7 +140,8 @@ async def create_growth_dashboard_card(guild: discord.Guild, total: int, day_cou
         draw.text((x, 201), value, fill=white, font=get_font(30, bold=True))
 
     risk_pct = (risk_count / total * 100) if total else 0.0
-    draw.text((48, 285), "RISK ASSESSMENT  ·  NEW ACCOUNTS UNDER 7 DAYS",
+    risk_label = "LOW" if risk_pct < 20 else "MODERATE" if risk_pct < 50 else "HIGH"
+    draw.text((48, 285), f"RISK ASSESSMENT  ·  {risk_label}  ·  NEW ACCOUNTS UNDER 7 DAYS",
               fill=accent, font=get_font(17, bold=True))
     draw.text((W - 170, 285), f"{risk_pct:.0f}%", fill=white, font=get_font(17, bold=True))
     bar_x, bar_y, bar_w, bar_h = 48, 320, W - 96, 18
