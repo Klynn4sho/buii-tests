@@ -363,7 +363,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         join_detail = f'{join_age} days old at join' if join_age is not None else 'No join record'
 
         header = ui.Section(
-            ui.TextDisplay(f'## **<@{user_id}>**\n-# `@{target_name}` · ID `{user_id}`'),
+            ui.TextDisplay(f'## **{display_name}**\n-# ID `{user_id}`'),
             accessory=ui.Thumbnail(media=avatar_url),
         )
         summary = ui.TextDisplay(
@@ -373,8 +373,8 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             f'**Boosting**  ·  {"✅ Yes" if boosting else "No"}'
         )
         invites = ui.TextDisplay(
-            f'**Invited by**  ·  {inviter}\n'
-            f'**Invite code**  ·  {invite_code}\n'
+            f'**Invited by**  ·  `{inviter}`\n'
+            f'**Invite code**  ·  `{invite_code}`\n'
             f'**Invites**  ·  {invite_count}\n'
             f'-# {join_detail}'
         )
