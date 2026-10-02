@@ -307,6 +307,8 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
         visible, x = [], avatar_start
         for i, m in enumerate(members):
             raw_name = clean_display_text(m.display_name or m.name, "Member")
+            if m.bot:
+                raw_name = f"{raw_name} [BOT]"
             name = _compat_fit(measure, raw_name, s(17), True, s(150))
             if not name.strip("… "):
                 name = clean_display_text(m.name, "Member")
