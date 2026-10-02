@@ -1070,8 +1070,10 @@ def _raw_renumber_songs(guild_id):
     conn = get_db_conn()
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT pg_advisory_xact_lock(%s);", (int(guild_id),))
+        cursor.execute("DROP TABLE IF EXISTS song_number_map;")
         cursor.execute('''
-            CREATE TEMP TABLE song_number_map AS
+            CREATE TEMP TABLE song_number_map ON COMMIT DROP AS
             SELECT id, song_number AS old_number,
                    ROW_NUMBER() OVER (ORDER BY id) AS new_number,
                    guild_id, channel_id, message_id
