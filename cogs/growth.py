@@ -198,6 +198,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         inviter = "Unknown / Custom Link"
         inviter_id = None
         used_code = "Unknown"
+        used_uses = None
 
         # Serialize invite diff+cache-update per guild so two members joining
         # within the same second can't both match against the same stale
@@ -215,13 +216,32 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                             inviter = inv.inviter.name
                             inviter_id = inv.inviter.id
                         used_code = inv.code
+                        used_uses = inv.uses
                         break
 
                 self.invites_cache[guild.id] = {inv.code: inv.uses for inv in current_invites}
-            except (discord.Forbidden, AttributeError):
+            except (discord.Forbidden, AttributeError, discord.HTTPException):
                 pass
 
-        await database.async_save_join(guild.id, member.id, member.name, inviter, used_code, account_age_days)
+            # Vanity joins do not appear in the normal invite diff.
+            if used_code == "Unknown":
+                try:
+                    vanity = await guild.vanity_invite()
+                    if vanity:
+                        used_code = vanity.code
+                        inviter = "Unknown / Vanity Link"
+                        invite_source = "vanity"
+                    else:
+                        invite_source = "unknown"
+                except (discord.Forbidden, discord.HTTPException, AttributeError):
+                    invite_source = "unknown"
+            else:
+                invite_source = "invite"
+
+        await database.async_save_join(
+            guild.id, member.id, member.name, inviter, used_code, account_age_days,
+            inviter_id=inviter_id, invite_uses=used_uses, invite_source=invite_source,
+        )
 
         maturity_bar = account_maturity_bar(account_age_days)
 
@@ -293,6 +313,32 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             view=view, file=view.file,
             allowed_mentions=discord.AllowedMentions(users=True, roles=True),
         )
+
+    @commands.hybrid_command(name="analytics", aliases=["growthreport"], description="Show reliable growth, retention, risk, and inviter analytics.")
+    async def analytics(self, ctx: commands.Context):
+        totals, left_count, top_inviters = await database.async_get_growth_analytics(ctx.guild.id)
+        total = int(totals["total_joins"] or 0)
+        retained = max(total - int(left_count or 0), 0)
+        retention = (retained / total * 100) if total else 0
+        risk = int(totals["high_risk"] or 0)
+        risk_pct = (risk / total * 100) if total else 0
+        lines = [
+            "## GROWTH ANALYTICS",
+            f"**Joins** · {total} total · {int(totals['joins_24h'] or 0)} in 24h · {int(totals['joins_7d'] or 0)} in 7d",
+            f"**Retention** · {retained} retained · {int(left_count or 0)} left · {retention:.0f}%",
+            f"**Risk** · {risk} accounts under 7 days · {risk_pct:.0f}% of recorded joins",
+            f"**Inviters** · {int(totals['unique_inviters'] or 0)} uniquely identified",
+            "",
+            "**Top inviters**",
+        ]
+        lines.extend(
+            f"{index:02d}. `{row['inviter']}` · **{row['joins_count']}** joins"
+            for index, row in enumerate(top_inviters, start=1)
+        )
+        if not top_inviters:
+            lines.append("*No inviter data recorded yet.*")
+        lines.append(footer_line("Growth Analytics"))
+        await ctx.send(view=SimpleLayout("\n".join(lines)))
 
     @commands.hybrid_command(name="leaderboard", aliases=["lb"], description="Displays top inviters based on recorded join history.")
     async def leaderboard(self, ctx: commands.Context):
