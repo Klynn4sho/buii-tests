@@ -4,7 +4,7 @@ import discord
 from discord import ui
 from discord.ext import commands
 
-from core.components import Layout, footer_line
+from core.components import Layout, footer_line, notice
 
 class ServerInfoCog(commands.Cog, name="ServerInfoCog"):
     def __init__(self, bot: commands.Bot):
@@ -14,7 +14,7 @@ class ServerInfoCog(commands.Cog, name="ServerInfoCog"):
     async def serverinfo(self, ctx: commands.Context):
         guild = ctx.guild
         if guild is None:
-            await ctx.send(view=discord.ui.LayoutView())
+            await ctx.send(view=notice("This command can only be used inside a server."))
             return
 
         members = list(guild.members)
@@ -26,14 +26,18 @@ class ServerInfoCog(commands.Cog, name="ServerInfoCog"):
         boost_text = f"Tier {guild.premium_tier} · {guild.premium_subscription_count or 0} boosts"
         feature_text = ", ".join(feature.replace("_", " ").title() for feature in guild.features[:5]) or "None"
 
-        header = ui.Section(
-            ui.TextDisplay(f"# {discord.utils.escape_markdown(guild.name)}\n-# Server overview · {guild.member_count or len(members):,} members"),
-            accessory=ui.Thumbnail(media=guild.icon.url) if guild.icon else None,
+        header_text = ui.TextDisplay(
+            f"# {discord.utils.escape_markdown(guild.name)}\n"
+            f"-# Server overview · {guild.member_count or len(members):,} members"
+        )
+        header = (
+            ui.Section(header_text, accessory=ui.Thumbnail(media=guild.icon.url))
+            if guild.icon else header_text
         )
         overview = (
             "### Overview\n"
             f"**Owner**  ·  {discord.utils.escape_markdown(owner_text)}\n"
-            f"**Created**  ·  {discord.utils.format_dt(guild.created_at, style="F")} ({discord.utils.format_dt(guild.created_at, style="R")})\n"
+            f"**Created**  ·  {discord.utils.format_dt(guild.created_at, style='F')} ({discord.utils.format_dt(guild.created_at, style='R')})\n"
             f"**Server ID**  ·  `{guild.id}`\n"
             f"**Verification**  ·  {verification}"
         )
