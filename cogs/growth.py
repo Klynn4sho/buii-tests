@@ -350,7 +350,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
 
         saved_roles = (snapshot or {}).get('roles') or []
         if live_member:
-            role_text = ', '.join(role.name for role in live_member.roles if not role.is_default()) or 'None recorded'
+            role_text = ', '.join(role.mention for role in live_member.roles if not role.is_default()) or 'None recorded'
         else:
             role_text = ', '.join(saved_roles) if saved_roles else 'None recorded'
         if len(role_text) > 850:
@@ -392,45 +392,16 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             details,
         ]
 
-        if live_member:
-            role_options = [
-                discord.SelectOption(
-                    label=role.name[:100],
-                    value=str(role.id),
-                    description=f'Position {role.position} · {len(role.members)} members'[:100],
-                )
-                for role in reversed(live_member.roles)
-                if not role.is_default()
-            ][:25]
-            if role_options:
-                role_select = ui.Select(placeholder='Select a role for details', options=role_options)
-
-                async def on_role_selected(interaction: discord.Interaction):
-                    role_id = int(role_select.values[0])
-                    role = live_member.guild.get_role(role_id)
-                    if not role:
-                        await interaction.response.send_message(view=notice('❌ That role is no longer available.'), ephemeral=True)
-                        return
-                    role_text = (
-                        f'## Role Details\n'
-                        f'**Name**  ·  {role.mention}\n'
-                        f'**Role ID**  ·  `{role.id}`\n'
-                        f'**Position**  ·  {role.position}\n'
-                        f'**Members**  ·  {len(role.members)}'
-                    )
-                    await interaction.response.send_message(view=SimpleLayout(role_text), ephemeral=True)
-
-                role_select.callback = on_role_selected
-                items.extend([
-                    ui.Separator(spacing=discord.SeparatorSpacing.small),
-                    ui.ActionRow(role_select),
-                ])
 
         items.extend([
             ui.TextDisplay(footer_line(f'Last saved {stamp((snapshot or {}).get("last_seen_at"))}')),
             ui.ActionRow(ui.Button(label='View Profile', style=discord.ButtonStyle.link, url=f'https://discord.com/users/{user_id}')),
         ])
-        await ctx.send(view=Layout(*items), ephemeral=bool(ctx.interaction))
+        await ctx.send(
+            view=Layout(*items),
+            allowed_mentions=discord.AllowedMentions(users=False, roles=False),
+            ephemeral=bool(ctx.interaction),
+        )
     @commands.hybrid_command(name="invites", description="View a member's invite history and stats.")
     async def invites(self, ctx: commands.Context, member: discord.Member = None):
         member = member or ctx.author
