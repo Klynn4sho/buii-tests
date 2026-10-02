@@ -386,7 +386,6 @@ class RenumberConfirmView(ui.LayoutView):
         self.container = ui.Container(
             ui.TextDisplay(text),
             ui.ActionRow(confirm_btn, cancel_btn),
-            accent_color=COLOR_DANGER,
         )
         self.add_item(self.container)
 
