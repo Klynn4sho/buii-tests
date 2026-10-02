@@ -81,7 +81,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                     try:
                         message = await channel.fetch_message(msg_id)
                         new_view = await DashboardView.build(guild)
-                        await message.edit(view=new_view)
+                        await message.edit(view=new_view, attachments=[new_view.file])
                     except Exception:
                         pass
 
@@ -306,7 +306,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                     pass
 
         view = await DashboardView.build(ctx.guild)
-        panel_message = await ctx.send(view=view)
+        panel_message = await ctx.send(view=view, file=view.file)
         await database.async_save_panel_config(ctx.guild.id, ctx.channel.id, panel_message.id)
 
     @commands.hybrid_command(name="graph", aliases=["g"], description="Displays daily growth trend charts.")
