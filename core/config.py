@@ -48,10 +48,10 @@ COLOR_ACCENT = discord.Color(0x2BC7C4)
 
 # --- matplotlib graph palette ---
 GRAPH_BG = "#2B2D31"
-GRAPH_GRID = "#3B3D44"
+GRAPH_GRID = "#24545A"
 GRAPH_TEXT = "#DBDEE1"
-GRAPH_ACCENT = "#5865F2"
-GRAPH_FILL = "#5865F2"
+GRAPH_ACCENT = "#2DD4BF"
+GRAPH_FILL = "#2DD4BF"
 
 # --- Behavior constants ---
 RATING_WINDOW_HOURS = 12  # how long a song stays open for voting before auto-closing
