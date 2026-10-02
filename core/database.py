@@ -8,6 +8,7 @@ feature — cogs import whichever functions they need from here.
 """
 
 import asyncio
+import json
 from datetime import datetime, timezone, timedelta
 
 import psycopg2
@@ -81,6 +82,29 @@ def _raw_init_db():
                 user_id TEXT,
                 leave_date TEXT
             );
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS member_snapshots (
+                guild_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                username TEXT,
+                display_name TEXT,
+                avatar_url TEXT,
+                created_at TIMESTAMPTZ,
+                joined_at TIMESTAMPTZ,
+                first_seen_at TIMESTAMPTZ DEFAULT NOW(),
+                last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+                last_left_at TIMESTAMPTZ,
+                is_member BOOLEAN DEFAULT TRUE,
+                boosting BOOLEAN DEFAULT FALSE,
+                roles_json TEXT,
+                badges_json TEXT,
+                PRIMARY KEY (guild_id, user_id)
+            );
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS member_snapshots_guild_status_idx
+            ON member_snapshots (guild_id, is_member);
         ''')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS config (
@@ -220,6 +244,117 @@ def _raw_save_leave(guild_id, user_id):
 
 async def async_save_leave(guild_id, user_id):
     await asyncio.to_thread(_raw_save_leave, guild_id, user_id)
+
+
+
+def _raw_upsert_member_snapshot(
+    guild_id, user_id, username, display_name, avatar_url,
+    created_at, joined_at, boosting, roles, badges, is_member=True,
+):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc)
+        cursor.execute('''
+            INSERT INTO member_snapshots (
+                guild_id, user_id, username, display_name, avatar_url,
+                created_at, joined_at, first_seen_at, last_seen_at,
+                last_left_at, is_member, boosting, roles_json, badges_json
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (guild_id, user_id) DO UPDATE SET
+                username = EXCLUDED.username,
+                display_name = EXCLUDED.display_name,
+                avatar_url = EXCLUDED.avatar_url,
+                created_at = COALESCE(EXCLUDED.created_at, member_snapshots.created_at),
+                joined_at = COALESCE(EXCLUDED.joined_at, member_snapshots.joined_at),
+                last_seen_at = EXCLUDED.last_seen_at,
+                last_left_at = CASE
+                    WHEN EXCLUDED.is_member THEN member_snapshots.last_left_at
+                    ELSE EXCLUDED.last_left_at
+                END,
+                is_member = EXCLUDED.is_member,
+                boosting = EXCLUDED.boosting,
+                roles_json = EXCLUDED.roles_json,
+                badges_json = EXCLUDED.badges_json;
+        ''', (
+            guild_id, user_id, username, display_name, avatar_url,
+            created_at, joined_at, now, now,
+            None if is_member else now, is_member, boosting,
+            json.dumps(roles or []), json.dumps(badges or []),
+        ))
+        conn.commit()
+        cursor.close()
+    finally:
+        release_db_conn(conn)
+
+
+async def async_upsert_member_snapshot(
+    guild_id, user_id, username, display_name, avatar_url,
+    created_at, joined_at, boosting, roles, badges, is_member=True,
+):
+    await asyncio.to_thread(
+        _raw_upsert_member_snapshot,
+        guild_id, user_id, username, display_name, avatar_url,
+        created_at, joined_at, boosting, roles, badges, is_member,
+    )
+
+
+def _raw_get_member_snapshot(guild_id, user_id):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute('''
+            SELECT * FROM member_snapshots
+            WHERE guild_id = %s AND user_id = %s;
+        ''', (guild_id, user_id))
+        row = cursor.fetchone()
+        cursor.close()
+        if row:
+            row["roles"] = json.loads(row.pop("roles_json") or "[]")
+            row["badges"] = json.loads(row.pop("badges_json") or "[]")
+        return row
+    finally:
+        release_db_conn(conn)
+
+
+async def async_get_member_snapshot(guild_id, user_id):
+    return await asyncio.to_thread(_raw_get_member_snapshot, guild_id, user_id)
+
+
+def _raw_get_member_invite_summary(guild_id, user_id, inviter_names):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute('''
+            SELECT user_id, user_name, inviter_name, invite_code, join_date, account_age_days
+            FROM joins
+            WHERE guild_id = %s AND user_id = %s
+            ORDER BY join_date DESC
+            LIMIT 1;
+        ''', (str(guild_id), str(user_id)))
+        latest_join = cursor.fetchone()
+
+        names = [name for name in (inviter_names or []) if name]
+        if names:
+            cursor.execute('''
+                SELECT COUNT(*) AS invite_count
+                FROM joins
+                WHERE guild_id = %s AND inviter_name = ANY(%s);
+            ''', (str(guild_id), names))
+            invite_count = cursor.fetchone()["invite_count"]
+        else:
+            invite_count = 0
+        cursor.close()
+        return latest_join, invite_count
+    finally:
+        release_db_conn(conn)
+
+
+async def async_get_member_invite_summary(guild_id, user_id, inviter_names):
+    return await asyncio.to_thread(
+        _raw_get_member_invite_summary, guild_id, user_id, inviter_names
+    )
 
 
 # ==========================================================================
