@@ -31,23 +31,29 @@ def s(v: float) -> int:
 
 
 def clean_display_text(value: str, fallback: str = "Unnamed") -> str:
-    """Make Discord names safe and readable in the Pillow renderer.
+    """Return text that the bundled DejaVu font can render reliably.
 
-    Compatibility normalization converts mathematical/script/bold Unicode
-    letters into ordinary letters. Decorative symbols and glyphs that the
-    bundled font cannot render are omitted instead of becoming tofu squares.
+    NFKC handles decorative mathematical/script alphabets. For remaining
+    characters, keep Latin/Greek/Cyrillic letters, combining marks, numbers,
+    punctuation, spaces, and a small set of common ASCII symbols. Unsupported
+    emoji/CJK/private-use glyphs are omitted instead of becoming square boxes.
     """
     normalized = unicodedata.normalize("NFKC", str(value or ""))
     kept = []
     for char in normalized:
+        codepoint = ord(char)
         category = unicodedata.category(char)
-        if category[0] in {"L", "N", "M", "P", "Z"}:
+        supported_script = (
+            codepoint <= 0x024F
+            or 0x1E00 <= codepoint <= 0x1EFF
+            or 0x0370 <= codepoint <= 0x052F
+        )
+        if supported_script and (category[0] in {"L", "N", "M", "P", "Z"}):
             kept.append(char)
         elif char in "$%&+@#=/_-":
             kept.append(char)
     cleaned = "".join(kept).strip()
     return cleaned or fallback
-
 
 def is_staff_role(role: discord.Role) -> bool:
     """Check if a role has staff permissions and is not ignored/bot-managed."""
@@ -213,7 +219,8 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     for role, members, accent in rows:
         visible, x = [], avatar_start
         for i, m in enumerate(members):
-            name = _fit(measure, clean_display_text(m.display_name, m.name), f_name, s(150))
+            readable_name = clean_display_text(m.display_name, "") or clean_display_text(m.name, "Member")
+            name = _fit(measure, readable_name, f_name, s(150))
             tw = measure.textlength(name, font=f_name) / SCALE
             w = avatar_d + name_gap + tw
             reserve = overflow_w if len(members) - i - 1 > 0 else 0
