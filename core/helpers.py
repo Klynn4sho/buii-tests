@@ -114,10 +114,11 @@ async def build_dashboard_content_items(guild: discord.Guild) -> list:
 
 async def create_growth_dashboard_card(guild: discord.Guild, total: int, day_count: int,
                                        risk_count: int, codes: list):
-    """Render the statspanel as a border-matched Pillow card."""
-    W, H = 1200, 650
+    """Render the statspanel as a risk-aware Pillow card."""
+    W, H = 1200, 720
     bg, panel = "#0F1013", "#1B1D22"
-    white, muted, accent = "#F2F3F5", "#A7ADB7", "#6574F5"
+    white, muted = "#F2F3F5", "#A7ADB7"
+    accent = ImageColor.getrgb(GRAPH_ACCENT)
     card = Image.new("RGB", (W, H), bg)
     draw = ImageDraw.Draw(card)
     draw.rounded_rectangle([12, 12, W - 12, H - 12], radius=24, fill=panel, outline=accent, width=4)
@@ -125,7 +126,8 @@ async def create_growth_dashboard_card(guild: discord.Guild, total: int, day_cou
     title_font = get_font(40, bold=True)
     draw.text((48, 42), _truncate_to_width(draw, f"{guild.name} Growth Dashboard", title_font, 930),
               fill=white, font=title_font)
-    draw.text((48, 96), "LIVE SERVER MONITOR  ·  refreshes every 60 minutes", fill=muted, font=get_font(19))
+    draw.text((48, 96), "LIVE SERVER MONITOR  ·  refreshes every 60 minutes",
+              fill=muted, font=get_font(19))
 
     stats = [
         ("TOTAL JOINS", str(total)),
@@ -137,18 +139,35 @@ async def create_growth_dashboard_card(guild: discord.Guild, total: int, day_cou
         draw.text((x, 170), label, fill=accent, font=get_font(15, bold=True))
         draw.text((x, 201), value, fill=white, font=get_font(30, bold=True))
 
-    draw.text((48, 285), "TOP INVITE CODES", fill=accent, font=get_font(17, bold=True))
-    y = 326
+    risk_pct = (risk_count / total * 100) if total else 0.0
+    draw.text((48, 285), "RISK ASSESSMENT  ·  NEW ACCOUNTS UNDER 7 DAYS",
+              fill=accent, font=get_font(17, bold=True))
+    draw.text((W - 170, 285), f"{risk_pct:.0f}%", fill=white, font=get_font(17, bold=True))
+    bar_x, bar_y, bar_w, bar_h = 48, 320, W - 96, 18
+    draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h],
+                           radius=9, fill="#30333B")
+    if risk_pct > 0:
+        fill_w = max(bar_h, int(bar_w * min(risk_pct, 100) / 100))
+        draw.rounded_rectangle([bar_x, bar_y, bar_x + fill_w, bar_y + bar_h],
+                               radius=9, fill=accent)
+    draw.text((48, 350), f"{risk_count} flagged of {total} recorded joins",
+              fill=muted, font=get_font(17))
+
+    draw.text((48, 405), "TOP INVITE CODES", fill=accent, font=get_font(17, bold=True))
+    y = 446
     if codes:
         for index, row in enumerate(codes[:5], start=1):
             line = f"{index:02d}. {row[0]}  ·  {row[1]} click{'s' if row[1] != 1 else ''}"
-            draw.text((48, y), _truncate_to_width(draw, line, get_font(21), W - 96), fill=white, font=get_font(21))
+            draw.text((48, y), _truncate_to_width(draw, line, get_font(21), W - 96),
+                      fill=white, font=get_font(21))
             y += 36
     else:
-        draw.text((48, y), "No custom invite links tracked yet.", fill=muted, font=get_font(20))
+        draw.text((48, y), "No custom invite links tracked yet.",
+                  fill=muted, font=get_font(20))
 
-    draw.line((48, 545, W - 48, 545), fill="#343740", width=2)
-    draw.text((48, 570), "Use the selector below for invite-code details.", fill=muted, font=get_font(18))
+    draw.line((48, 625, W - 48, 625), fill="#343740", width=2)
+    draw.text((48, 650), "Use the selector below for invite-code details.",
+              fill=muted, font=get_font(18))
 
     buf = io.BytesIO()
     card.save(buf, format="PNG", optimize=True)
@@ -180,8 +199,8 @@ async def build_joins_graph_async(guild_id, days=30):
 
         draw.text((left, 30), f"SERVER GROWTH TREND — LAST {days} DAYS",
                   fill=text_color, font=get_font(24, bold=True))
-        draw.text((left, top - 34), "DAILY NEW MEMBERS", fill=text_color,
-                  font=get_font(16, bold=True))
+        draw.text((left, top - 34), "DAILY NEW MEMBERS",
+                  fill=text_color, font=get_font(16, bold=True))
 
         for tick in range(max_count + 1):
             y = bottom - int(plot_h * tick / max_count)
@@ -194,20 +213,47 @@ async def build_joins_graph_async(guild_id, days=30):
             y = bottom - int(plot_h * count / max_count)
             points.append((x, y))
 
+        smooth = []
         if len(points) > 1:
-            fill_points = [(points[0][0], bottom), *points, (points[-1][0], bottom)]
+            for index in range(len(points) - 1):
+                p0 = points[max(0, index - 1)]
+                p1 = points[index]
+                p2 = points[index + 1]
+                p3 = points[min(len(points) - 1, index + 2)]
+                for step in range(12):
+                    t = step / 12
+                    t2, t3 = t * t, t * t * t
+                    x = 0.5 * (
+                        (2 * p1[0])
+                        + (-p0[0] + p2[0]) * t
+                        + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2
+                        + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3
+                    )
+                    y = 0.5 * (
+                        (2 * p1[1])
+                        + (-p0[1] + p2[1]) * t
+                        + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2
+                        + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3
+                    )
+                    smooth.append((int(x), max(top, min(bottom, int(y)))))
+            smooth.append(points[-1])
+
+        if len(smooth) > 1:
+            fill_points = [(smooth[0][0], bottom), *smooth, (smooth[-1][0], bottom)]
             draw.polygon(fill_points, fill=tuple(int((a + b) / 2) for a, b in zip(fill, bg)))
-            draw.line(points, fill=accent, width=5, joint="curve")
+            draw.line(smooth, fill=accent, width=5, joint="curve")
+
         for (x, y), (_, count) in zip(points, series):
             if count > 0:
-                draw.ellipse((x - 7, y - 7, x + 7, y + 7), fill=bg, outline=accent, width=3)
+                draw.ellipse((x - 8, y - 8, x + 8, y + 8), fill=bg, outline=accent, width=3)
                 draw.ellipse((x - 3, y - 3, x + 3, y + 3), fill=accent)
 
         label_step = max(1, len(series) // 6)
         for index in range(0, len(series), label_step):
             date = series[index][0]
             x = left + int(plot_w * index / max(len(series) - 1, 1))
-            draw.text((x - 28, bottom + 18), date.strftime("%b %d"), fill=text_color, font=get_font(15))
+            draw.text((x - 28, bottom + 18), date.strftime("%b %d"),
+                      fill=text_color, font=get_font(15))
 
         draw.line((left, bottom, right, bottom), fill=grid, width=2)
         buf = io.BytesIO()
