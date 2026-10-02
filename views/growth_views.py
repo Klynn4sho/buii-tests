@@ -170,7 +170,7 @@ class InviteStatsView(ui.LayoutView):
         if rows:
             for row in rows:
                 flag = " · new account" if row["account_age_days"] < 7 else ""
-                lines.append(f"• **{row['user_name']}** · {row['join_date']}{flag}")
+                lines.append(f"• **{row['user_name']}** (`{row['user_id']}`) · {row['join_date']} · {row['account_age_days']}d{flag}")
         else:
             lines.append("*No invite records found.*")
         await interaction.response.send_message(
