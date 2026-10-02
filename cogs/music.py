@@ -284,7 +284,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         accent = discord.Color.from_str(score_color(avg)) if count > 0 else COLOR_ACCENT
         await ctx.send(view=SimpleLayout(text, accent=accent))
 
-    @commands.hybrid_command(name="synctoplaylist", description="Manually add a song to the Spotify playlist.")
+    @commands.hybrid_command(name="synctoplaylist", description="Sync a locked, qualifying song to the Spotify playlist.")
     @has_mod_permission()
     async def synctoplaylist(self, ctx: commands.Context, song_id: int):
         song = await database.get_song_by_number(ctx.guild.id, song_id)
@@ -327,7 +327,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             await ctx.send(view=SimpleLayout(text, accent=COLOR_SUCCESS), ephemeral=True)
         else:
             await ctx.send(
-                view=notice("❌ Spotify sync failed. Check that `SPOTIFY_USER_TOKEN` and `SPOTIFY_PLAYLIST_ID` are set and the token has the `playlist-modify` scope."),
+                view=notice("❌ Spotify sync failed. Check that `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`, and `SPOTIFY_PLAYLIST_ID` are set and the token has the `playlist-modify` scope."),
                 ephemeral=True,
             )
 
