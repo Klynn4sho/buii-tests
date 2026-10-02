@@ -389,6 +389,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
         True,
         s(max(title_max, 200)),
     )
+    title_w = _compat_width(measure, title_text, s(40), True) / SCALE
     _draw_compat_text(draw, (s(title_x), s(88)), title_text, s(40), True, (226, 255, 251), anchor="lm")
     _tracked_text(draw, s(title_x), s(126), "STAFF DIRECTORY", f_cap, (116, 177, 180), s(4))
 
