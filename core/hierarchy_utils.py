@@ -341,14 +341,6 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     # ---- header: translucent bits first (pills, divider, icon ring)
     hov = Image.new("RGBA", img.size, (0, 0, 0, 0))
     hd = ImageDraw.Draw(hov)
-    hd.rounded_rectangle(
-        [s(margin), s(34), s(W - margin), s(154)],
-        radius=s(22),
-        fill=(20, 48, 53, 92),
-        outline=(91, 239, 222, 42),
-        width=s(1),
-    )
-
     pills = [((74, 222, 128), f"{len(staff_ids)} Staff"),
              ((129, 140, 248), f"{len(rows)} Tiers"),
              ((251, 191, 36), f"{vacant} Vacant")]
@@ -382,12 +374,8 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
         draw.text((s(icon_x + icon_d / 2), s(icon_y + icon_d / 2)), (clean_guild_name[:1] or "?").upper(),
                   font=f_title, fill=(225, 255, 251), anchor="mm")
 
-    heading = "SERVER HIERARCHY"
-    heading_w = _tracked_width(measure, heading, f_tracked_lg, s(5)) / SCALE
-    heading_x = pill_x0 - 28 - heading_w
-
     title_x = icon_x + icon_d + 24
-    title_max = heading_x - 34 - title_x
+    title_max = pill_x0 - 36 - title_x
     title_text = _compat_fit(
         measure,
         clean_guild_name,
@@ -404,13 +392,6 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
                      fill=rgb)
         draw.text((s(x0 + pill_pad + dot_d + dot_gap), s(pill_cy)), text, font=f_pill,
                   fill=(236, 237, 243), anchor="lm")
-
-    _tracked_text(draw, s(heading_x), s(pill_cy), heading, f_tracked_lg, (197, 246, 240), s(4))
-
-    tagline = "ROLES  ·  PEOPLE  ·  STRUCTURE"
-    tag_w = _tracked_width(measure, tagline, f_tracked_sm, s(3)) / SCALE
-    tag_x = W - margin - tag_w
-    _tracked_text(draw, s(tag_x), s(128), tagline, f_tracked_sm, (86, 112, 116), s(3))
 
     # ---- role rows
     for i, ((role, members, accent), (visible, overflow, end_x)) in enumerate(zip(rows, plans)):
