@@ -430,7 +430,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
                 song = await database.get_song(ctx.guild.id, row["id"])
                 avg, count = await database.get_song_stats(ctx.guild.id, row["id"])
                 if song and song.get("closed"):
-                    await message.edit(view=ClosedRatingView(song, avg, count))
+                    await message.edit(view=ClosedRatingView())
                 else:
                     new_view = RatingView(
                         ctx.guild.id, row["id"], row["new_number"], title=song["title"] if song else None,
