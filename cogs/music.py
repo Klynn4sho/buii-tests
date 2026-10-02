@@ -20,7 +20,11 @@ from discord.ext import commands, tasks
 
 from core import database
 from core.checks import has_mod_permission
-from core.config import (\n    RATING_WINDOW_HOURS, COLOR_ACCENT, COLOR_SUCCESS,\n    SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN,\n    SPOTIFY_PLAYLIST_ID,\n)
+from core.config import (
+    RATING_WINDOW_HOURS, COLOR_ACCENT, COLOR_SUCCESS,
+    SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN,
+    SPOTIFY_PLAYLIST_ID,
+)
 from core.components import SimpleLayout, Layout, footer_line, notice
 from core.helpers import create_music_card, format_elapsed, score_color
 from core.music_utils import (
