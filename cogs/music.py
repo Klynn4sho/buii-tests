@@ -298,6 +298,22 @@ class MusicCog(commands.Cog, name="MusicCog"):
             await ctx.send(view=notice(f"⚠️ Song ID `{song_id}` is already in the playlist."), ephemeral=True)
             return
 
+        created_at = song.get("created_at")
+        average, votes = await database.get_song_stats(ctx.guild.id, song["id"])
+        is_locked = bool(song.get("closed")) and created_at and (
+            datetime.now(timezone.utc) - created_at >= timedelta(hours=RATING_WINDOW_HOURS)
+        )
+        if not is_locked or votes <= 4 or average < 7.0:
+            await ctx.send(
+                view=notice(
+                    f"❌ This song is not eligible yet. It must be locked after {RATING_WINDOW_HOURS} hours, "
+                    f"have more than 4 votes, and average at least 7.0/10. "
+                    f"Current: {average:.1f}/10 ({votes} votes)."
+                ),
+                ephemeral=True,
+            )
+            return
+
         await ctx.defer(ephemeral=True)
         success = await sync_to_spotify(self.bot.http_session, song["url"])
         if success:
