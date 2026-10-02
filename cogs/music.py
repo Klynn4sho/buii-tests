@@ -20,7 +20,7 @@ from discord.ext import commands, tasks
 
 from core import database
 from core.checks import has_mod_permission
-from core.config import RATING_WINDOW_HOURS, COLOR_ACCENT, COLOR_SUCCESS
+from core.config import (\n    RATING_WINDOW_HOURS, COLOR_ACCENT, COLOR_SUCCESS,\n    SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN,\n    SPOTIFY_PLAYLIST_ID,\n)
 from core.components import SimpleLayout, Layout, footer_line, notice
 from core.helpers import create_music_card, format_elapsed, score_color
 from core.music_utils import (
@@ -292,6 +292,36 @@ class MusicCog(commands.Cog, name="MusicCog"):
         )
         accent = discord.Color.from_str(score_color(avg)) if count > 0 else COLOR_ACCENT
         await ctx.send(view=SimpleLayout(text, accent=accent))
+
+    @commands.hybrid_command(name="spotify", aliases=["spotify_status", "spotifyinfo"], description="Show Spotify integration status without exposing secrets.")
+    @has_mod_permission()
+    async def spotify_status(self, ctx: commands.Context):
+        configured = {
+            "Client ID": bool(SPOTIFY_CLIENT_ID),
+            "Client secret": bool(SPOTIFY_CLIENT_SECRET),
+            "Refresh token": bool(SPOTIFY_REFRESH_TOKEN),
+            "Playlist ID": bool(SPOTIFY_PLAYLIST_ID),
+        }
+        ready = all(configured.values())
+        lines = [
+            "## SPOTIFY STATUS",
+            f"**Integration** · {'✅ Ready' if ready else '⚠️ Incomplete configuration'}",
+            f"**Authorization** · {'✅ Refresh-token flow enabled' if SPOTIFY_REFRESH_TOKEN else '❌ Refresh token missing'}",
+            f"**Playlist** · {'✅ Configured' if SPOTIFY_PLAYLIST_ID else '❌ Playlist ID missing'}",
+            "",
+            "**Configuration checks**",
+        ]
+        lines.extend(
+            f"{'✅' if present else '❌'} {label}"
+            for label, present in configured.items()
+        )
+        lines.extend([
+            "",
+            f"**Sync rules** · locked for {RATING_WINDOW_HOURS}h · more than 4 votes · average ≥ 7.0",
+            "-# Access and refresh tokens are never displayed.",
+            footer_line("Spotify Integration"),
+        ])
+        await ctx.send(view=SimpleLayout("\n".join(lines), accent=COLOR_SUCCESS if ready else COLOR_ACCENT), ephemeral=bool(ctx.interaction))
 
     @commands.hybrid_command(name="synctoplaylist", description="Sync a locked, qualifying song to the Spotify playlist.")
     @has_mod_permission()
