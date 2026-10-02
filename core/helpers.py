@@ -322,11 +322,9 @@ async def create_invite_stats_card(
     """Render a clean Pillow invite-statistics card."""
     W, H = 1100, 610
     bg, panel = "#0F1013", "#1B1D22"
-    white, muted, accent = "#F2F3F5", "#A7ADB7", "#6574F5"
+    white, muted = "#F2F3F5", "#A7ADB7"
     card = Image.new("RGB", (W, H), bg)
     draw = ImageDraw.Draw(card)
-
-    draw.rounded_rectangle([12, 12, W - 12, H - 12], radius=24, fill=panel, outline=accent, width=4)
 
     avatar_size = 142
     avatar = None
@@ -342,6 +340,17 @@ async def create_invite_stats_card(
     if avatar is None:
         avatar = Image.new("RGB", (avatar_size, avatar_size), "#2B2D31")
         ImageDraw.Draw(avatar).text((avatar_size // 2 - 16, avatar_size // 2 - 22), "?", fill=muted, font=get_font(42, bold=True))
+
+    # Match the card border to the member avatar instead of using one fixed
+    # brand blue for every profile.
+    sample = avatar.resize((1, 1), Image.LANCZOS).getpixel((0, 0))
+    hue, saturation, value = colorsys.rgb_to_hsv(*(channel / 255 for channel in sample))
+    saturation = max(saturation, 0.45)
+    value = max(value, 0.68)
+    accent_rgb = tuple(int(channel * 255) for channel in colorsys.hsv_to_rgb(hue, saturation, value))
+    accent = "#%02x%02x%02x" % accent_rgb
+    draw.rounded_rectangle([12, 12, W - 12, H - 12], radius=24, fill=panel, outline=accent, width=4)
+
     card.paste(avatar, (W - 190, 38), _rounded_mask((avatar_size, avatar_size), 24))
     draw.rounded_rectangle([W - 190, 38, W - 48, 180], radius=24, outline=accent, width=3)
 
