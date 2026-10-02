@@ -180,7 +180,7 @@ async def build_joins_graph_async(guild_id, days=30):
 
         draw.text((left, 30), f"SERVER GROWTH TREND — LAST {days} DAYS",
                   fill=text_color, font=get_font(24, bold=True))
-        draw.text((22, top + plot_h // 2), "NEW JOINS", fill=text_color,
+        draw.text((left, top - 34), "DAILY NEW MEMBERS", fill=text_color,
                   font=get_font(16, bold=True))
 
         for tick in range(max_count + 1):
@@ -198,8 +198,10 @@ async def build_joins_graph_async(guild_id, days=30):
             fill_points = [(points[0][0], bottom), *points, (points[-1][0], bottom)]
             draw.polygon(fill_points, fill=tuple(int((a + b) / 2) for a, b in zip(fill, bg)))
             draw.line(points, fill=accent, width=5, joint="curve")
-        for x, y in points:
-            draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill=bg, outline=accent, width=3)
+        for (x, y), (_, count) in zip(points, series):
+            if count > 0:
+                draw.ellipse((x - 7, y - 7, x + 7, y + 7), fill=bg, outline=accent, width=3)
+                draw.ellipse((x - 3, y - 3, x + 3, y + 3), fill=accent)
 
         label_step = max(1, len(series) // 6)
         for index in range(0, len(series), label_step):
