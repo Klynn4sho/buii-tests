@@ -410,9 +410,6 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     tagline = "ROLES  ·  PEOPLE  ·  STRUCTURE"
     tag_w = _tracked_width(measure, tagline, f_tracked_sm, s(3)) / SCALE
     tag_x = W - margin - tag_w
-    tagline = "ROLES  ·  PEOPLE  ·  STRUCTURE"
-    tag_w = _tracked_width(measure, tagline, f_tracked_sm, s(3)) / SCALE
-    tag_x = max(margin + 420, W - margin - tag_w)
     _tracked_text(draw, s(tag_x), s(128), tagline, f_tracked_sm, (86, 112, 116), s(3))
 
     # ---- role rows
