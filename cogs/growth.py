@@ -271,27 +271,25 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             return
 
         flagged_alts = totals["flagged_alts"] or 0
-        retained = total_joins - left_count
-        retention_pct = (retained / total_joins * 100) if total_joins else 0.0
-
-        text = (
-            f"# 🔗 {member.display_name}'s Invite Stats\n"
-            f"Total Invites: **{total_joins}**\n"
-            f"Still in Server: **{retained}** (**{retention_pct:.0f}%**)\n"
-            f"Left Since Joining: **{left_count}**\n"
+        code_rows = await database.async_get_invite_code_stats(ctx.guild.id, member.name)
+        card_buf = await create_invite_stats_card(
+            self.bot.http_session,
+            member.display_avatar.url,
+            member.display_name,
+            member.name,
+            total_joins,
+            total_joins - left_count,
+            left_count,
+            flagged_alts,
+            recent,
         )
-        if flagged_alts:
-            text += f"\n🚩 **Flagged New Accounts**\n**{flagged_alts}** invited account(s) were under 7 days old at join time.\n"
-        if recent:
-            lines = []
-            for row in recent:
-                age_flag = " 🚩" if row["account_age_days"] < 7 else ""
-                lines.append(f"• **{row['user_name']}**{age_flag} — {row['join_date']}")
-            text += "\n**🕒 Most Recent Invitees**\n" + "\n".join(lines) + "\n"
-        text += footer_line("Invite Attribution — matched by username at join time")
-
-        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=member.display_avatar.url))]
-        await ctx.send(view=Layout(*items, accent=COLOR_BRAND))
+        view = InviteStatsView(
+            discord.File(fp=card_buf, filename=f"invite-stats-{member.id}.png"),
+            ctx.guild.id,
+            member.name,
+            code_rows,
+        )
+        await ctx.send(view=view, file=view.file)
 
     @commands.hybrid_command(name="statspanel", aliases=["sp"], description="Deploys an auto-refreshing live server growth dashboard.")
     @has_mod_permission()
