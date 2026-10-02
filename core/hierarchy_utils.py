@@ -116,7 +116,7 @@ def _font_for_char(size: int, bold: bool, char: str):
                 props = fm.FontProperties(family=family, weight="bold" if bold else "normal")
                 path = fm.findfont(props, fallback_to_default=False)
                 break
-            except (ValueError, OSError):
+            except (ValueError, OSError, TypeError):
                 continue
         if path:
             try:
