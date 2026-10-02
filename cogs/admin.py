@@ -106,7 +106,36 @@ class AdminCog(commands.Cog, name="AdminCog"):
         await ctx.send(view=SimpleLayout(text), ephemeral=bool(ctx.interaction))
 
 
-NaN
+    @commands.hybrid_command(name="sync", description="Synchronize slash commands for this server.")
+    @commands.has_permissions(administrator=True)
+    @commands.cooldown(rate=1, per=60.0, type=commands.BucketType.guild)
+    async def sync_commands(self, ctx: commands.Context, option: str = None):
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.defer(ephemeral=True)
+        try:
+            if option == "clear":
+                self.bot.tree.clear_commands(guild=ctx.guild)
+                await self.bot.tree.sync(guild=ctx.guild)
+                message = "🧹 **Cleared all guild slash commands!**"
+            else:
+                synced = await self.bot.tree.sync()
+                self.bot.tree.clear_commands(guild=ctx.guild)
+                self.bot.tree.copy_global_to(guild=ctx.guild)
+                guild_synced = await self.bot.tree.sync(guild=ctx.guild)
+                message = (
+                    f"⚡ **Synced {len(synced)} global commands and "
+                    f"{len(guild_synced)} commands to this server.**"
+                )
+            if ctx.interaction and ctx.interaction.response.is_done():
+                await ctx.followup.send(view=notice(message), ephemeral=True)
+            else:
+                await ctx.send(view=notice(message))
+        except discord.HTTPException as e:
+            print(f"[sync] failed: {e!r}")
+            if ctx.interaction and ctx.interaction.response.is_done():
+                await ctx.followup.send(view=notice("❌ Discord rejected the sync request — try again shortly."), ephemeral=True)
+            else:
+                await ctx.send(view=notice("❌ Discord rejected the sync request — try again shortly."))
 
     @sync_commands.error
     async def sync_commands_error(self, ctx: commands.Context, error: commands.CommandError):
