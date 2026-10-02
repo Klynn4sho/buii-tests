@@ -295,31 +295,40 @@ class MusicCog(commands.Cog, name="MusicCog"):
                 ephemeral=True,
             )
 
-    @commands.hybrid_command(name="myratings", description="View your personal music rating statistics and top picks.")
-    async def myratings(self, ctx: commands.Context):
-        stats, top_rated = await database.get_user_stats(ctx.guild.id, ctx.author.id)
+    @commands.hybrid_command(
+        name="musicprofile",
+        aliases=["myratings"],
+        description="View your music profile, or another member's profile.",
+    )
+    @app_commands.describe(member="The member whose music profile you want to view")
+    async def musicprofile(self, ctx: commands.Context, member: discord.Member = None):
+        target = member or ctx.author
+        stats, top_rated = await database.get_user_stats(ctx.guild.id, target.id)
         if not stats or stats["total"] == 0:
-            await ctx.send(view=notice("❌ You haven't rated any songs in this server yet!"), ephemeral=True)
+            owner = "You haven't" if target.id == ctx.author.id else f"{target.display_name} hasn't"
+            await ctx.send(view=notice(f"❌ {owner} rated any songs in this server yet!"), ephemeral=True)
             return
 
         avg_score = stats["avg_given"] or 0.0
         total_votes = stats["total"]
+        possessive = "Your" if target.id == ctx.author.id else f"{target.display_name}'s"
 
         text = (
-            f"## 📊 {ctx.author.display_name}'s Music Profile\n"
+            f"## {possessive} Music Profile\n"
             f"Total Songs Rated: **{total_votes}**\n"
-            f"Average Score Given: **⭐ {avg_score:.1f}/10**\n"
+            f"Average Score Given: **{avg_score:.1f}/10**\n"
         )
         if top_rated:
             lines = []
             for idx, song in enumerate(top_rated, start=1):
                 artist = f" — {song['artist']}" if song['artist'] else ""
-                lines.append(f"**{idx}. {song['title']}{artist}** (Your Score: **{song['score']}/10**)")
-            text += "\n**🔝 Your Highest Rated Tracks**\n" + "\n".join(lines) + "\n"
-        text += footer_line("Personal Music Taste Profile")
+                score_label = "Your Score" if target.id == ctx.author.id else "Score"
+                lines.append(f"**{idx}. {song['title']}{artist}** ({score_label}: **{song['score']}/10**)")
+            text += "\n**Highest Rated Tracks**\n" + "\n".join(lines) + "\n"
+        text += footer_line("Music Profile")
 
-        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=ctx.author.display_avatar.url))]
-        await ctx.send(view=Layout(*items, accent=COLOR_ACCENT), ephemeral=True)
+        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=target.display_avatar.url))]
+        await ctx.send(view=Layout(*items), ephemeral=True)
 
     @commands.hybrid_command(name="setmusicchannel", aliases=["smc"], description="Restrict music link detection to a specific channel, or 'off' to allow any channel.")
     @has_mod_permission()
