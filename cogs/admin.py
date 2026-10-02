@@ -12,7 +12,10 @@ from discord.ext import commands
 
 from core import database
 from core.components import notice, SimpleLayout
-from core.config import DEFAULT_PREFIX
+from core.config import (
+    DEFAULT_PREFIX, BYPASS_USER_ID, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET,
+    SPOTIFY_REFRESH_TOKEN, SPOTIFY_PLAYLIST_ID,
+)
 from views.help_views import HelpView
 
 
@@ -49,6 +52,41 @@ class AdminCog(commands.Cog, name="AdminCog"):
                     await ctx.send(view=notice("❌ Couldn't open the help menu — try again in a moment."))
                 except Exception:
                     pass
+
+    @commands.hybrid_command(
+        name="diagnostics",
+        description="Show private bot health diagnostics (owner bypass only).",
+    )
+    async def diagnostics(self, ctx: commands.Context):
+        """Private health panel for the configured BYPASS_USER_ID only."""
+        if not BYPASS_USER_ID or ctx.author.id != BYPASS_USER_ID:
+            await ctx.send(
+                view=notice("❌ This diagnostic command is restricted."),
+                ephemeral=bool(ctx.interaction),
+            )
+            return
+
+        db_ready = database.db_pool is not None
+        session = getattr(self.bot, "http_session", None)
+        spotify_ready = all((
+            SPOTIFY_CLIENT_ID,
+            SPOTIFY_CLIENT_SECRET,
+            SPOTIFY_REFRESH_TOKEN,
+            SPOTIFY_PLAYLIST_ID,
+        ))
+        latency_ms = round(self.bot.latency * 1000) if self.bot.latency != float("inf") else "offline"
+
+        text = (
+            "## BOT DIAGNOSTICS\n"
+            "-# Private owner health check\n\n"
+            f"**Gateway**  ·  `{latency_ms} ms`\n"
+            f"**Guilds**  ·  `{len(self.bot.guilds)}`\n"
+            f"**Database pool**  ·  {'✅ ready' if db_ready else '❌ unavailable'}\n"
+            f"**HTTP session**  ·  {'✅ ready' if session and not session.closed else '❌ unavailable'}\n"
+            f"**Spotify configuration**  ·  {'✅ complete' if spotify_ready else '⚠️ incomplete'}\n\n"
+            + "Use this panel to verify deployment health without exposing secrets."
+        )
+        await ctx.send(view=SimpleLayout(text), ephemeral=bool(ctx.interaction))
 
 
     @commands.command(name="sync")
