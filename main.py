@@ -160,7 +160,7 @@ async def _command_prefix_for(message: discord.Message) -> str:
 def _command_hint_view(title: str, body: str, run_label: str | None = None,
                        callback=None) -> ui.LayoutView:
     view = ui.LayoutView(timeout=90)
-    items = [ui.TextDisplay(f"## {title}\\n{body}")]
+    items = [ui.TextDisplay(f"## {title}\n{body}")]
     if run_label and callback:
         button = ui.Button(label=run_label, style=discord.ButtonStyle.secondary)
         button.callback = callback
@@ -216,7 +216,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
         prefix = await _command_prefix_for(ctx.message)
         signature = command.signature or f"<{error.param.name}>"
         body = (
-            f"{command.description or command.short_doc or 'View command details.'}\\n"
+            f"{command.description or command.short_doc or 'View command details.'}\n"
             f"-# Syntax: `{prefix}{command.qualified_name} {signature}` | `/{command.qualified_name} {signature}`"
         )
         await ctx.send(view=_command_hint_view(command.qualified_name, body))
