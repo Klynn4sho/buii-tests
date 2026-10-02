@@ -1071,7 +1071,10 @@ def _raw_renumber_songs(guild_id):
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("SELECT pg_advisory_xact_lock(%s);", (int(guild_id),))
-        cursor.execute("DROP TABLE IF EXISTS song_number_map;")
+        # Keep the mapping in a transaction-local temp table, and move the
+        # live values to unique negative IDs before assigning 1..N. This
+        # avoids immediate unique-index collisions while rows are rewritten.
+        cursor.execute("DROP TABLE IF EXISTS pg_temp.song_number_map;")
         cursor.execute('''
             CREATE TEMP TABLE song_number_map ON COMMIT DROP AS
             SELECT id, song_number AS old_number,
@@ -1080,25 +1083,22 @@ def _raw_renumber_songs(guild_id):
             FROM songs
             WHERE guild_id = %s;
         ''', (guild_id,))
-        cursor.execute('SELECT COALESCE(MAX(song_number), 0) + 1000000 FROM songs WHERE guild_id = %s;', (guild_id,))
-        offset = cursor.fetchone()[0]
-        cursor.execute('''
-            UPDATE songs s
-            SET song_number = m.new_number + %s
-            FROM song_number_map m
-            WHERE s.id = m.id;
-        ''', (offset,))
         cursor.execute('''
             UPDATE songs
-            SET song_number = song_number - %s
+            SET song_number = -id
             WHERE guild_id = %s;
-        ''', (offset, guild_id))
+        ''', (guild_id,))
+        cursor.execute('''
+            UPDATE songs s
+            SET song_number = m.new_number
+            FROM song_number_map m
+            WHERE s.id = m.id;
+        ''')
         cursor.execute('''
             SELECT id, guild_id, old_number, new_number, channel_id, message_id
             FROM song_number_map ORDER BY new_number;
         ''')
         rows = cursor.fetchall()
-        cursor.execute('DROP TABLE song_number_map;')
         conn.commit()
         cursor.close()
         return rows
