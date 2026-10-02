@@ -15,7 +15,7 @@ import psycopg2
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 
-from core.config import DB_CONNECTION_STRING, DEFAULT_PREFIX
+from core.config import DB_CONNECTION_STRING, DEFAULT_PREFIX, DB_POOL_MIN, DB_POOL_MAX
 
 # --- Connection pool ---
 db_pool = None
@@ -28,7 +28,7 @@ def init_db_pool():
     if not DB_CONNECTION_STRING:
         raise RuntimeError("DB_URL environment variable is not set.")
     try:
-        db_pool = psycopg2.pool.SimpleConnectionPool(1, 5, DB_CONNECTION_STRING)
+        db_pool = psycopg2.pool.SimpleConnectionPool(DB_POOL_MIN, DB_POOL_MAX, DB_CONNECTION_STRING)
     except psycopg2.Error as exc:
         raise RuntimeError("Could not connect to PostgreSQL. Check DB_URL and database availability.") from exc
 
@@ -73,9 +73,17 @@ def _raw_init_db():
                 invite_code TEXT,
                 join_date TEXT,
                 account_age_days INTEGER,
+                inviter_id TEXT,
+                invite_uses INTEGER,
+                invite_source TEXT DEFAULT 'invite',
                 PRIMARY KEY (guild_id, user_id, join_date)
             );
         ''')
+        cursor.execute("ALTER TABLE joins ADD COLUMN IF NOT EXISTS inviter_id TEXT;")
+        cursor.execute("ALTER TABLE joins ADD COLUMN IF NOT EXISTS invite_uses INTEGER;")
+        cursor.execute("ALTER TABLE joins ADD COLUMN IF NOT EXISTS invite_source TEXT DEFAULT 'invite';")
+        cursor.execute("CREATE INDEX IF NOT EXISTS joins_guild_date_idx ON joins (guild_id, join_date);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS joins_inviter_id_idx ON joins (guild_id, inviter_id);")
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS leaves (
                 guild_id TEXT,
@@ -207,24 +215,35 @@ async def init_music_db():
 # Invite tracking: joins / leaves
 # ==========================================================================
 
-def _raw_save_join(guild_id, user_id, user_name, inviter_name, invite_code, account_age_days):
+def _raw_save_join(guild_id, user_id, user_name, inviter_name, invite_code, account_age_days, inviter_id=None, invite_uses=None, invite_source="invite"):
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
         now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         cursor.execute('''
-            INSERT INTO joins (guild_id, user_id, user_name, inviter_name, invite_code, join_date, account_age_days)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO joins (
+                guild_id, user_id, user_name, inviter_name, invite_code, join_date,
+                account_age_days, inviter_id, invite_uses, invite_source
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT DO NOTHING;
-        ''', (str(guild_id), str(user_id), user_name, inviter_name, invite_code, now, int(account_age_days)))
+        ''', (str(guild_id), str(user_id), user_name, inviter_name, invite_code, now,
+         int(account_age_days), str(inviter_id) if inviter_id else None,
+         invite_uses, invite_source))
         conn.commit()
         cursor.close()
     finally:
         release_db_conn(conn)
 
 
-async def async_save_join(guild_id, user_id, user_name, inviter_name, invite_code, account_age_days):
-    await asyncio.to_thread(_raw_save_join, guild_id, user_id, user_name, inviter_name, invite_code, account_age_days)
+async def async_save_join(
+    guild_id, user_id, user_name, inviter_name, invite_code, account_age_days,
+    inviter_id=None, invite_uses=None, invite_source="invite",
+):
+    await asyncio.to_thread(
+        _raw_save_join, guild_id, user_id, user_name, inviter_name,
+        invite_code, account_age_days, inviter_id, invite_uses, invite_source,
+    )
 
 
 def _raw_save_leave(guild_id, user_id):
@@ -648,6 +667,45 @@ def _raw_compile_dashboard_stats(guild_id):
 
 async def async_compile_dashboard_stats(guild_id):
     return await asyncio.to_thread(_raw_compile_dashboard_stats, guild_id)
+
+
+def _raw_get_growth_analytics(guild_id):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute('''
+            SELECT
+                COUNT(*) AS total_joins,
+                COUNT(*) FILTER (WHERE join_date >= NOW() - INTERVAL '24 hours') AS joins_24h,
+                COUNT(*) FILTER (WHERE join_date >= NOW() - INTERVAL '7 days') AS joins_7d,
+                COUNT(*) FILTER (WHERE account_age_days < 7) AS high_risk,
+                COUNT(DISTINCT inviter_id) FILTER (WHERE inviter_id IS NOT NULL) AS unique_inviters
+            FROM joins WHERE guild_id = %s;
+        ''', (str(guild_id),))
+        totals = cursor.fetchone()
+        cursor.execute('''
+            SELECT COUNT(DISTINCT j.user_id) AS left_count
+            FROM joins j JOIN leaves l
+              ON l.guild_id = j.guild_id AND l.user_id = j.user_id
+            WHERE j.guild_id = %s;
+        ''', (str(guild_id),))
+        left_count = cursor.fetchone()["left_count"]
+        cursor.execute('''
+            SELECT COALESCE(inviter_id, inviter_name) AS inviter,
+                   COUNT(*) AS joins_count
+            FROM joins WHERE guild_id = %s
+            GROUP BY COALESCE(inviter_id, inviter_name)
+            ORDER BY joins_count DESC LIMIT 5;
+        ''', (str(guild_id),))
+        top_inviters = cursor.fetchall()
+        cursor.close()
+        return totals, left_count, top_inviters
+    finally:
+        release_db_conn(conn)
+
+
+async def async_get_growth_analytics(guild_id):
+    return await asyncio.to_thread(_raw_get_growth_analytics, guild_id)
 
 
 def _raw_get_joins_in_range(guild_id, start_dt=None):
