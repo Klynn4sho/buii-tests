@@ -22,6 +22,7 @@ Environment Variables:
 
 import asyncio
 import os
+import traceback
 from difflib import get_close_matches
 import signal
 from datetime import datetime, timezone
@@ -102,7 +103,12 @@ class BuiiBot(commands.Bot):
             self.http_session = aiohttp.ClientSession()
 
         for extension in EXTENSIONS:
-            await self.load_extension(extension)
+            try:
+                await self.load_extension(extension)
+                print(f"Loaded extension: {extension}")
+            except Exception:
+                print(f"Failed to load extension: {extension}")
+                traceback.print_exc()
 
         try:
             synced = await self.tree.sync()
@@ -222,15 +228,27 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
         await ctx.send(view=_command_hint_view(command.qualified_name, body))
         return
 
+    if isinstance(error, commands.CommandInvokeError):
+        error = error.original
+
     if isinstance(error, commands.MissingPermissions):
         text = "❌ You don't have permission to use that command."
+    elif isinstance(error, commands.BotMissingPermissions):
+        text = "⚠️ I need these permissions first: " + ", ".join(error.missing_permissions)
+    elif isinstance(error, commands.MissingRole):
+        text = "❌ You need the required server role to use that command."
+    elif isinstance(error, commands.NotOwner):
+        text = "❌ This command is restricted to the bot owner."
+    elif isinstance(error, commands.CheckFailure):
+        text = "❌ You don't meet the requirements to use that command."
     elif isinstance(error, commands.BadArgument):
         text = f"⚠️ Couldn't understand one of your arguments: {error}"
     elif isinstance(error, commands.CommandOnCooldown):
         text = f"⏱️ That command is on cooldown. Try again in {error.retry_after:.1f}s."
     else:
-        print(f"Unhandled command error in '{ctx.command}': {error}")
-        text = "❌ Something went wrong running that command."
+        print(f"Unhandled command error in '{ctx.command}' ({ctx.guild} / {ctx.author}):")
+        traceback.print_exception(type(error), error, error.__traceback__)
+        text = "❌ Something went wrong running that command. The error was logged."
 
     try:
         await ctx.send(view=notice(text))
@@ -240,13 +258,18 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CommandInvokeError):
+        error = error.original
     if isinstance(error, app_commands.MissingPermissions):
         message = "❌ You don't have permission to use that command."
+    elif isinstance(error, app_commands.BotMissingPermissions):
+        message = "⚠️ I need these permissions first: " + ", ".join(error.missing_permissions)
     elif isinstance(error, app_commands.CommandOnCooldown):
         message = f"⏱️ That command is on cooldown. Try again in {error.retry_after:.1f}s."
     else:
-        print(f"Unhandled app command error: {error}")
-        message = "❌ Something went wrong running that command."
+        print(f"Unhandled app command error in {interaction.command}:")
+        traceback.print_exception(type(error), error, error.__traceback__)
+        message = "❌ Something went wrong running that command. The error was logged."
 
     try:
         if interaction.response.is_done():
