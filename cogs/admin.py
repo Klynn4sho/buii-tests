@@ -11,7 +11,7 @@ import discord
 from discord.ext import commands
 
 from core import database
-from core.components import notice
+from core.components import notice, SimpleLayout
 from core.config import DEFAULT_PREFIX
 from views.help_views import HelpView
 
@@ -23,15 +23,33 @@ class AdminCog(commands.Cog, name="AdminCog"):
     @commands.hybrid_command(name="help", aliases=["h"], description="Browse every command by category, with search.")
     async def help_command(self, ctx: commands.Context):
         try:
+            if ctx.interaction and not ctx.interaction.response.is_done():
+                await ctx.defer()
             prefix = await database.async_get_prefix(ctx.guild.id) if ctx.guild else DEFAULT_PREFIX
             view = HelpView(self.bot, ctx.author, prefix)
             view.sent_message = await ctx.send(view=view)
         except Exception as e:
             print(f"[help] failed to open help menu: {e!r}")
+            # Keep help usable even if a newly added command has malformed
+            # metadata or Discord rejects one interactive component.
             try:
-                await ctx.send(view=notice("❌ Couldn't open the help menu — try again in a moment."))
+                commands_list = sorted({
+                    command.name for command in self.bot.commands
+                    if not command.hidden
+                })
+                fallback = (
+                    "## Buii Help\n"
+                    f"Use {prefix if 'prefix' in locals() else DEFAULT_PREFIX}<command> "
+                    "or /command.\n\n"
+                    + " · ".join(commands_list)
+                )
+                await ctx.send(view=SimpleLayout(fallback))
             except Exception:
-                pass
+                try:
+                    await ctx.send(view=notice("❌ Couldn't open the help menu — try again in a moment."))
+                except Exception:
+                    pass
+
 
     @commands.command(name="sync")
     @commands.has_permissions(administrator=True)
