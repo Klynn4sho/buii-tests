@@ -433,7 +433,15 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
         await confirm_msg.edit(view=notice("⏳ Renumbering songs and repairing rating messages..."))
 
-        mapping = await database.renumber_songs(ctx.guild.id)
+        try:
+            mapping = await database.renumber_songs(ctx.guild.id)
+        except Exception as error:
+            print(f"[music] /renumbersongs failed for guild {ctx.guild.id}: {error!r}")
+            await confirm_msg.edit(view=notice(
+                "❌ Renumbering failed while updating the database. "
+                "The transaction was rolled back; check the bot logs for details."
+            ))
+            return
 
         repaired, failed, unchanged = 0, 0, 0
         for row in mapping:
@@ -469,7 +477,8 @@ class MusicCog(commands.Cog, name="MusicCog"):
                     )
                     await message.edit(view=new_view)
                 repaired += 1
-            except Exception:
+            except Exception as error:
+                print(f"[music] couldn't repair song message {row['id']}: {error!r}")
                 failed += 1
 
         result_text = (
