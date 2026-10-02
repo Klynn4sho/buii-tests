@@ -308,7 +308,8 @@ class SongLeaderboardView(ui.LayoutView):
         search_button.callback = self.on_search
         self.container = ui.Container(
             ui.TextDisplay(self._render_text()),
-            ui.ActionRow(self.select, search_button),
+            ui.ActionRow(self.select),
+            ui.ActionRow(search_button),
         )
         self.add_item(self.container)
 
