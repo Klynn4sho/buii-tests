@@ -478,6 +478,32 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         )
         await ctx.send(view=view, file=view.file)
 
+    @commands.hybrid_command(name="memberhistory", aliases=["joinhistory"], description="Show saved joins and leaves for a member.")
+    @discord.app_commands.describe(user="The member or user whose history you want to inspect")
+    async def memberhistory(self, ctx: commands.Context, user: discord.User = None):
+        target = user or ctx.author
+        rows = await database.async_get_member_history(ctx.guild.id, target.id)
+        lines = [f"## MEMBER HISTORY · {target.display_name}", f"-# ID `{target.id}`", ""]
+        if not rows:
+            lines.append("*No saved join or leave events for this user.*")
+        else:
+            for row in rows:
+                event = "Joined" if row["event_type"] == "join" else "Left"
+                date = row["event_date"]
+                if hasattr(date, "timestamp"):
+                    date_text = f"<t:{int(date.timestamp())}:R>"
+                else:
+                    date_text = str(date)
+                details = []
+                if row["event_type"] == "join":
+                    if row.get("invite_code"):
+                        details.append(f"code `{row['invite_code']}`")
+                    if row.get("inviter_name"):
+                        details.append(f"by **{row['inviter_name']}**")
+                lines.append(f"**{event}** · {date_text}" + (f" · {' · '.join(details)}" if details else ""))
+        lines.append(footer_line("Persistent Member Records"))
+        await ctx.send(view=SimpleLayout("\n".join(lines)))
+
     @commands.hybrid_command(name="statspanel", aliases=["sp"], description="Deploys an auto-refreshing live server growth dashboard.")
     @has_mod_permission()
     async def statspanel(self, ctx: commands.Context):
