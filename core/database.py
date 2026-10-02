@@ -611,6 +611,65 @@ async def async_get_inviter_stats(guild_id, inviter_name, recent_limit=10):
     return await asyncio.to_thread(_raw_get_inviter_stats, guild_id, inviter_name, recent_limit)
 
 
+def _raw_get_invite_code_stats(guild_id, inviter_name):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute('''
+            SELECT invite_code AS code,
+                   COUNT(*) AS invite_count,
+                   COUNT(*) FILTER (WHERE account_age_days < 7) AS flagged_count
+            FROM joins
+            WHERE guild_id = %s
+              AND inviter_name = %s
+              AND invite_code IS NOT NULL
+              AND invite_code != ''
+              AND invite_code != 'Unknown'
+            GROUP BY invite_code
+            ORDER BY invite_count DESC, code ASC;
+        ''', (str(guild_id), inviter_name))
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    finally:
+        release_db_conn(conn)
+
+
+async def async_get_invite_code_stats(guild_id, inviter_name):
+    return await asyncio.to_thread(_raw_get_invite_code_stats, guild_id, inviter_name)
+
+
+def _raw_get_invitees(guild_id, inviter_name, invite_code=None, limit=25):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        if invite_code:
+            cursor.execute('''
+                SELECT user_id, user_name, invite_code, join_date, account_age_days
+                FROM joins
+                WHERE guild_id = %s AND inviter_name = %s AND invite_code = %s
+                ORDER BY join_date DESC
+                LIMIT %s;
+            ''', (str(guild_id), inviter_name, invite_code, limit))
+        else:
+            cursor.execute('''
+                SELECT user_id, user_name, invite_code, join_date, account_age_days
+                FROM joins
+                WHERE guild_id = %s AND inviter_name = %s
+                ORDER BY join_date DESC
+                LIMIT %s;
+            ''', (str(guild_id), inviter_name, limit))
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    finally:
+        release_db_conn(conn)
+
+
+async def async_get_invitees(guild_id, inviter_name, invite_code=None, limit=25):
+    return await asyncio.to_thread(_raw_get_invitees, guild_id, inviter_name, invite_code, limit)
+
+
 # ==========================================================================
 # Music: songs
 # ==========================================================================
