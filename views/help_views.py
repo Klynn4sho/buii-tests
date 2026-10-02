@@ -250,7 +250,7 @@ class HelpView(ui.LayoutView):
 
         greeting = (
             f"### **Hey {name} 👋**\n"
-            f"I'm **Buii** — invite tracking, growth analytics and music ratings in one bot.\n"
+            f"I'm **BUII** — invite tracking, growth analytics and music ratings in one bot.\n"
             f"Run commands with the prefix `{self.prefix}` or slash `/`."
         )
         how_to = (
@@ -272,7 +272,7 @@ class HelpView(ui.LayoutView):
         )
 
         return [
-            self._header("Buii — Help", f"Home · for {name}"),
+            self._header("BUII — Help", f"Home · for {name}"),
             ui.Separator(),
             ui.TextDisplay(greeting),
             self._small_sep(),
