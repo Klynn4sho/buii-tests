@@ -9,6 +9,7 @@ trick as create_music_card) so rounded corners, rings and text stay smooth.
 
 import asyncio
 import io
+import unicodedata
 from datetime import datetime, timezone
 
 import discord
@@ -27,6 +28,25 @@ WHITE = (240, 241, 246)
 def s(v: float) -> int:
     """Logical px -> real px at the supersampled scale."""
     return int(round(v * SCALE))
+
+
+def clean_display_text(value: str, fallback: str = "Unnamed") -> str:
+    """Make Discord names safe and readable in the Pillow renderer.
+
+    Compatibility normalization converts mathematical/script/bold Unicode
+    letters into ordinary letters. Decorative symbols and glyphs that the
+    bundled font cannot render are omitted instead of becoming tofu squares.
+    """
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    kept = []
+    for char in normalized:
+        category = unicodedata.category(char)
+        if category[0] in {"L", "N", "M", "P", "Z"}:
+            kept.append(char)
+        elif char in "$%&+@#=/_-":
+            kept.append(char)
+    cleaned = "".join(kept).strip()
+    return cleaned or fallback
 
 
 def is_staff_role(role: discord.Role) -> bool:
@@ -140,8 +160,7 @@ def _row_card(w, h, accent, strength):
     ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     od = ImageDraw.Draw(ov)
     od.rounded_rectangle([0, 0, w - 1, h - 1], radius=radius,
-                          outline=(*accent, int(120 * strength) + 25), width=s(1.5))
-    od.rectangle([0, 0, s(5), h - 1], fill=(*accent, 255))
+                          outline=(*accent, int(95 * strength) + 20), width=s(1))
     card = Image.alpha_composite(card, ov)
     card.putalpha(ImageChops.multiply(card.getchannel("A"), mask))
     return card
@@ -167,6 +186,9 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     f_name = get_font(s(17), bold=True)
     f_foot = get_font(s(14), bold=False)
 
+    clean_guild_name = clean_display_text(guild.name, "Server")
+    clean_requester = clean_display_text(requested_by, "") if requested_by else ""
+
     measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
 
     # ---- gather rows + stats
@@ -191,7 +213,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     for role, members, accent in rows:
         visible, x = [], avatar_start
         for i, m in enumerate(members):
-            name = _fit(measure, m.display_name, f_name, s(150))
+            name = _fit(measure, clean_display_text(m.display_name, m.name), f_name, s(150))
             tw = measure.textlength(name, font=f_name) / SCALE
             w = avatar_d + name_gap + tw
             reserve = overflow_w if len(members) - i - 1 > 0 else 0
@@ -257,7 +279,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
 
     title_x = icon_x + icon_d + 24
     title_max = (pill_x0 - 330) - title_x        # leave room for the right-hand title
-    draw.text((s(title_x), s(88)), _fit(measure, guild.name, f_title, s(max(title_max, 200))),
+    draw.text((s(title_x), s(88)), _fit(measure, clean_guild_name, f_title, s(max(title_max, 200))),
               font=f_title, fill=(255, 255, 255), anchor="lm")
     _tracked_text(draw, s(title_x), s(126), "STAFF DIRECTORY", f_cap, MUTED, s(4))
 
@@ -294,7 +316,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
                 img.alpha_composite(role_icon.resize((s(26), s(26)), Image.LANCZOS),
                                     dest=(s(name_x), s(y + 18)))
                 name_x += 34
-        draw.text((s(name_x), s(y + 32)), _fit(measure, role.name, f_role, s(170 - (name_x - (rx + 80)))),
+        draw.text((s(name_x), s(y + 32)), _fit(measure, clean_display_text(role.name, "Unnamed role"), f_role, s(170 - (name_x - (rx + 80)))),
                   font=f_role, fill=(255, 255, 255), anchor="lm")
 
         if members:
@@ -329,7 +351,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     ImageDraw.Draw(fov).rectangle([s(margin), s(footer_y - 22), s(W - margin), s(footer_y - 22) + max(1, s(1))],
                                    fill=(255, 255, 255, 20))
     img.alpha_composite(fov)
-    left = "Highest role first ▲" + (f"   ·   {requested_by}" if requested_by else "")
+    left = "Highest role first" + (f"   ·   {clean_requester}" if clean_requester else "")
     draw.text((s(margin), s(footer_y + 6)), left, font=f_foot, fill=MUTED, anchor="lm")
     draw.text((s(W - margin), s(footer_y + 6)), datetime.now(timezone.utc).strftime("%d %b %Y"),
               font=f_foot, fill=MUTED, anchor="rm")
