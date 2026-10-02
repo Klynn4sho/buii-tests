@@ -27,6 +27,8 @@ def _build_db_connection_string(raw: str | None) -> str | None:
 
 
 DB_CONNECTION_STRING = _build_db_connection_string(os.environ.get("DB_URL"))
+DB_POOL_MIN = max(1, int(os.environ.get("DB_POOL_MIN", "1")))
+DB_POOL_MAX = max(DB_POOL_MIN, int(os.environ.get("DB_POOL_MAX", "8")))
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 _bypass_raw = os.environ.get("BYPASS_USER_ID")
