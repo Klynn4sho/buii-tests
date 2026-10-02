@@ -49,9 +49,15 @@ class HierarchyCog(commands.Cog, name="HierarchyCog"):
             await ctx.send(view=notice("No staff roles found."))
             return
 
-        buffer, total_staff, vacant_count = await build_hierarchy_image(
-            ctx.guild, staff_roles, self.bot.http_session, requested_by=f"Requested by {ctx.author.display_name}"
-        )
+        try:
+            buffer, total_staff, vacant_count = await build_hierarchy_image(
+                ctx.guild, staff_roles, self.bot.http_session,
+                requested_by=f"Requested by {ctx.author.display_name}",
+            )
+        except Exception as error:
+            print(f"[hierarchy] render failed for guild {ctx.guild.id}: {error!r}")
+            await ctx.send(view=notice("❌ Could not render the hierarchy card. Check the bot logs for details."))
+            return
 
         file = discord.File(fp=buffer, filename="hierarchy.png")
         # The rendered image already carries its own title, stat pills and
