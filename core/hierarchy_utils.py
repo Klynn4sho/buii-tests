@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 import discord
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
+import matplotlib.font_manager as fm
 
 from core.config import MODERATION_PERMISSIONS, HIERARCHY_IGNORED_ROLE_NAMES
 from core.helpers import get_font
@@ -91,6 +92,86 @@ def accent_for(role: discord.Role):
 
 
 # ---------------------------------------------------------------- drawing utils
+
+_GLYPH_FONT_CACHE = {}
+
+
+def _font_for_char(size: int, bold: bool, char: str):
+    """Choose an installed font that can cover a special-character range."""
+    category = unicodedata.category(char)
+    codepoint = ord(char)
+    if codepoint < 0x250 or (0x1E00 <= codepoint <= 0x1EFF):
+        return get_font(size, bold=bold)
+
+    families = (
+        ["Noto Sans Symbols 2", "Noto Sans Symbols", "Segoe UI Symbol", "DejaVu Sans"]
+        if category.startswith("S") or category.startswith("So")
+        else ["Noto Sans CJK SC", "Noto Sans", "Arial Unicode MS", "DejaVu Sans"]
+    )
+    key = (size, bold, tuple(families))
+    if key not in _GLYPH_FONT_CACHE:
+        path = None
+        for family in families:
+            try:
+                props = fm.FontProperties(family=family, weight="bold" if bold else "normal")
+                path = fm.findfont(props, fallback_to_default=False)
+                break
+            except (ValueError, OSError):
+                continue
+        if path:
+            try:
+                _GLYPH_FONT_CACHE[key] = ImageFont.truetype(path, size)
+            except OSError:
+                _GLYPH_FONT_CACHE[key] = None
+        else:
+            _GLYPH_FONT_CACHE[key] = None
+    return _GLYPH_FONT_CACHE[key]
+
+
+def _compat_chars(text: str) -> list[str]:
+    normalized = unicodedata.normalize("NFKC", str(text or ""))
+    return [char for char in normalized if not unicodedata.category(char).startswith("C")]
+
+
+def _compat_width(draw, text: str, size: int, bold: bool) -> int:
+    return sum(draw.textlength(char, font=_font_for_char(size, bold, char))
+               for char in _compat_chars(text)
+               if _font_for_char(size, bold, char) is not None)
+
+
+def _compat_fit(draw, text: str, size: int, bold: bool, max_width: int) -> str:
+    chars = _compat_chars(text)
+    if _compat_width(draw, text, size, bold) <= max_width:
+        return "".join(chars)
+    ellipsis = "…"
+    output = []
+    width = 0
+    for char in chars:
+        font = _font_for_char(size, bold, char)
+        if font is None:
+            continue
+        next_width = width + draw.textlength(char, font=font)
+        if next_width + draw.textlength(ellipsis, font=get_font(size, bold)) > max_width:
+            break
+        output.append(char)
+        width = next_width
+    return "".join(output).rstrip() + ellipsis
+
+
+def _draw_compat_text(draw, xy, text: str, size: int, bold: bool, fill, anchor="lm"):
+    x, y = xy
+    chars = _compat_chars(text)
+    fonts = [(_font_for_char(size, bold, char), char) for char in chars]
+    fonts = [(font, char) for font, char in fonts if font is not None]
+    total = sum(draw.textlength(char, font=font) for font, char in fonts)
+    if anchor == "mm":
+        x -= total / 2
+    elif anchor == "rm":
+        x -= total
+    for font, char in fonts:
+        draw.text((x, y), char, font=font, fill=fill, anchor="lm")
+        x += draw.textlength(char, font=font)
+
 
 def _tracked_width(draw, text, font, tracking):
     return sum(draw.textlength(c, font=font) for c in text) + tracking * max(len(text) - 1, 0)
@@ -286,8 +367,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
 
     title_x = icon_x + icon_d + 24
     title_max = (pill_x0 - 330) - title_x        # leave room for the right-hand title
-    draw.text((s(title_x), s(88)), _fit(measure, clean_guild_name, f_title, s(max(title_max, 200))),
-              font=f_title, fill=(255, 255, 255), anchor="lm")
+    _draw_compat_text(draw, (s(title_x), s(88)), clean_guild_name, s(40), True, (255, 255, 255), anchor="lm")
     _tracked_text(draw, s(title_x), s(126), "STAFF DIRECTORY", f_cap, MUTED, s(4))
 
     for (rgb, text), x0, width in zip(pills, pill_positions, pill_widths):
@@ -323,8 +403,8 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
                 img.alpha_composite(role_icon.resize((s(26), s(26)), Image.LANCZOS),
                                     dest=(s(name_x), s(y + 18)))
                 name_x += 34
-        draw.text((s(name_x), s(y + 32)), _fit(measure, clean_display_text(role.name, "Unnamed role"), f_role, s(170 - (name_x - (rx + 80)))),
-                  font=f_role, fill=(255, 255, 255), anchor="lm")
+        role_text = _compat_fit(measure, clean_display_text(role.name, "Unnamed role"), s(22), True, s(170 - (name_x - (rx + 80))))
+        _draw_compat_text(draw, (s(name_x), s(y + 32)), role_text, s(22), True, (255, 255, 255), anchor="lm")
 
         if members:
             sub = f"{len(members)} member" + ("s" if len(members) != 1 else "")
@@ -341,7 +421,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
             if av is None:
                 av = Image.new("RGBA", (16, 16), (60, 62, 74, 255))
             img.alpha_composite(_circle(av, s(inner)), dest=(s(ax + ring), s(cy - inner / 2)))
-            draw.text((s(ax + avatar_d + name_gap), s(cy)), name, font=f_name, fill=(245, 245, 250), anchor="lm")
+            _draw_compat_text(draw, (s(ax + avatar_d + name_gap), s(cy)), name, s(17), True, (245, 245, 250), anchor="lm")
 
         if overflow > 0:
             ox = rx + end_x
