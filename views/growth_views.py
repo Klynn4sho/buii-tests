@@ -14,7 +14,7 @@ import discord
 from discord import ui
 
 from core import database
-from core.config import BYPASS_USER_ID, COLOR_BRAND
+from core.config import BYPASS_USER_ID
 from core.components import SimpleLayout, footer_line, notice
 from core.helpers import build_dashboard_content_items, build_joins_graph_async
 
@@ -271,7 +271,6 @@ class GraphView(ui.LayoutView):
             ui.MediaGallery(discord.MediaGalleryItem(graph_file)),
             ui.ActionRow(self.range_select),
             ui.TextDisplay(footer_line("Visual Intelligence")),
-            accent_color=COLOR_BRAND,
         )
         self.add_item(self.container)
 
