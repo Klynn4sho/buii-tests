@@ -61,7 +61,12 @@ def keep_alive():
 async def get_prefix(bot_instance: "BuiiBot", message: discord.Message):
     if not message.guild:
         return DEFAULT_PREFIX
-    return await database.async_get_prefix(message.guild.id)
+    configured = await database.async_get_prefix(message.guild.id)
+    # Keep the default b, prefix usable even if an older database row stores
+    # a custom prefix without the comma or an outdated value.
+    if configured == DEFAULT_PREFIX:
+        return configured
+    return (configured, DEFAULT_PREFIX)
 
 
 class BuiiBot(commands.Bot):
