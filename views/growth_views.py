@@ -16,7 +16,7 @@ from discord import ui
 from core import database
 from core.config import BYPASS_USER_ID
 from core.components import SimpleLayout, footer_line, notice
-from core.helpers import build_dashboard_content_items, build_joins_graph_async
+from core.helpers import build_dashboard_content_items, build_joins_graph_async, create_growth_dashboard_card
 
 
 async def _notify_error(interaction: discord.Interaction, text: str):
@@ -180,35 +180,87 @@ class InviteStatsView(ui.LayoutView):
 
 
 class DashboardView(ui.LayoutView):
-    def __init__(self, content_items: list | None = None):
+    def __init__(self, guild_id: int = None, code_rows: list[dict] = None, card_file=None):
         super().__init__(timeout=None)
-
-        items = content_items or [ui.TextDisplay("Loading dashboard…")]
-        self.container = ui.Container(*items)
+        self.guild_id = guild_id
+        self.code_rows = code_rows or []
+        self.file = card_file
 
         refresh_btn = ui.Button(label="Refresh Stats", style=discord.ButtonStyle.primary,
-                                 custom_id="btn_refresh_dashboard")
-        refresh_btn.callback = self.on_refresh
-
+                                custom_id="btn_refresh_dashboard")
         export_btn = ui.Button(label="Export History", style=discord.ButtonStyle.secondary,
-                                custom_id="btn_export_csv")
+                               custom_id="btn_export_csv")
+        refresh_btn.callback = self.on_refresh
         export_btn.callback = self.on_export
 
-        self.container.add_item(ui.ActionRow(refresh_btn, export_btn))
+        items = []
+        if card_file is not None:
+            items.append(ui.MediaGallery(discord.MediaGalleryItem(card_file)))
+        else:
+            items.append(ui.TextDisplay("Dashboard loading…"))
+
+        if self.guild_id and self.code_rows:
+            options = [
+                discord.SelectOption(
+                    label=str(row["code"])[:100],
+                    value=str(row["code"])[:100],
+                    description=f"{row['invite_count']} invite(s) · {row['flagged_count']} new account(s)"[:100],
+                )
+                for row in self.code_rows[:25]
+            ]
+            self.code_select = ui.Select(placeholder="Choose an invite code for details…", options=options)
+            self.code_select.callback = self.on_code_selected
+            items.append(ui.ActionRow(self.code_select))
+
+        items.append(ui.ActionRow(refresh_btn, export_btn))
+        self.container = ui.Container(*items)
         self.add_item(self.container)
 
     @classmethod
     async def build(cls, guild: discord.Guild) -> "DashboardView":
-        items = await build_dashboard_content_items(guild)
-        return cls(items)
+        total, day_count, risk_count, codes = await database.async_compile_dashboard_stats(guild.id)
+        card_buf = await create_growth_dashboard_card(
+            guild, total, day_count, risk_count, codes
+        )
+        code_rows = await database.async_get_invite_code_stats(guild.id)
+        return cls(
+            guild_id=guild.id,
+            code_rows=code_rows,
+            card_file=discord.File(fp=card_buf, filename="growth-dashboard.png"),
+        )
+
+    async def on_code_selected(self, interaction: discord.Interaction):
+        code = self.code_select.values[0]
+        invitees = await database.async_get_invitees(
+            self.guild_id, invite_code=code, limit=25
+        )
+        row = next((item for item in self.code_rows if str(item["code"]) == code), None)
+        lines = [
+            f"## Invite Code: {code}",
+            f"Invites: **{row['invite_count'] if row else len(invitees)}**",
+            f"Flagged accounts: **{row['flagged_count'] if row else 0}**",
+            f"Invite link: https://discord.gg/{code}",
+            "",
+        ]
+        if invitees:
+            lines.append("**People invited**")
+            for item in invitees:
+                flag = " · new account" if item["account_age_days"] < 7 else ""
+                lines.append(
+                    f"• **{item['user_name']}** ({item['user_id']}) · "
+                    f"{item['join_date']} · {item['account_age_days']}d{flag}"
+                )
+        else:
+            lines.append("*No invite records found for this code.*")
+        await interaction.response.send_message(view=SimpleLayout("\n".join(lines)), ephemeral=True)
 
     async def on_refresh(self, interaction: discord.Interaction):
         if not interaction.guild:
             return
         try:
+            await interaction.response.defer()
             new_view = await DashboardView.build(interaction.guild)
-            await interaction.response.edit_message(view=new_view)
-            await interaction.followup.send(view=notice("✅ Dashboard metrics refreshed successfully!"), ephemeral=True)
+            await interaction.edit_original_response(view=new_view, attachments=[new_view.file])
         except Exception as e:
             print(f"[growth] dashboard refresh failed: {e!r}")
             await _notify_error(interaction, "❌ Couldn't refresh the dashboard — try again in a moment.")
@@ -237,11 +289,11 @@ class DashboardView(ui.LayoutView):
 
             filename = "tracker_export_all_time.csv"
             discord_file = discord.File(fp=io.BytesIO(output.getvalue().encode('utf-8')), filename=filename)
-            # A plain followup (no view=) is a normal message, so content + a
-            # file attachment together is fine here — the "no content/embeds"
-            # restriction only applies to messages carrying a LayoutView. This
-            # is a raw file delivery, so it stays a plain attachment message.
-            await interaction.followup.send(content="📊 Here is your exported join history CSV:", file=discord_file, ephemeral=True)
+            await interaction.followup.send(
+                content="📊 Here is your exported join history CSV:",
+                file=discord_file,
+                ephemeral=True,
+            )
         except Exception as e:
             print(f"[growth] CSV export failed: {e!r}")
             await _notify_error(interaction, "❌ Couldn't build the CSV export — try again in a moment.")
