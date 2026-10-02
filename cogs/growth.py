@@ -108,8 +108,16 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                         members = [member async for member in guild.fetch_members(limit=None)]
                     except (discord.Forbidden, discord.HTTPException):
                         members = guild.members
-                    for member in members:
-                        await self.snapshot_member(member)
+                    semaphore = asyncio.Semaphore(20)
+
+                    async def save_one(member):
+                        async with semaphore:
+                            try:
+                                await self.snapshot_member(member)
+                            except (discord.HTTPException, asyncio.TimeoutError) as error:
+                                print(f"[growth] snapshot failed for {member.id}: {error!r}")
+
+                    await asyncio.gather(*(save_one(member) for member in members))
             except asyncio.CancelledError:
                 raise
             except Exception as error:
