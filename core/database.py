@@ -56,6 +56,28 @@ def release_db_conn(conn):
 guild_prefix_cache = {}
 
 
+def _raw_check_db_health():
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1;")
+        cursor.fetchone()
+        cursor.close()
+        return True
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
+    finally:
+        release_db_conn(conn)
+
+
+async def async_check_db_health():
+    return await asyncio.to_thread(_raw_check_db_health)
+
+
 # ==========================================================================
 # Schema setup
 # ==========================================================================
