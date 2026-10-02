@@ -84,19 +84,113 @@ class JoinAlertView(ui.LayoutView):
         self.add_item(self.container)
 
 
+class InviteCodeSelectView(ui.LayoutView):
+    """Ephemeral invite-code picker with per-code invite details."""
+    def __init__(self, guild_id: int, inviter_name: str, code_rows: list[dict]):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        self.inviter_name = inviter_name
+        self.code_rows = code_rows[:25]
+
+        options = [
+            discord.SelectOption(
+                label=str(row["code"])[:100],
+                value=str(row["code"])[:100],
+                description=f"{row['invite_count']} invite(s) · {row['flagged_count']} new account(s)"[:100],
+            )
+            for row in self.code_rows
+        ]
+        self.select = ui.Select(placeholder="Choose an invite code…", options=options)
+        self.select.callback = self.on_select
+        self.add_item(ui.Container(
+            ui.TextDisplay("## Created Invite Codes\nSelect a code to view its invite details."),
+            ui.ActionRow(self.select),
+        ))
+
+    async def on_select(self, interaction: discord.Interaction):
+        code = self.select.values[0]
+        invitees = await database.async_get_invitees(
+            self.guild_id, self.inviter_name, invite_code=code, limit=25
+        )
+        row = next((item for item in self.code_rows if str(item["code"]) == code), None)
+        lines = [
+            f"## Invite Code: `{code}`",
+            f"Invites: **{row['invite_count'] if row else len(invitees)}**",
+            f"Flagged accounts: **{row['flagged_count'] if row else 0}**",
+            "",
+        ]
+        if invitees:
+            lines.append("**People invited**")
+            for item in invitees:
+                flag = " · new account" if item["account_age_days"] < 7 else ""
+                lines.append(f"• **{item['user_name']}** · {item['join_date']}{flag}")
+        else:
+            lines.append("*No invite records found for this code.*")
+        await interaction.response.send_message(view=SimpleLayout("\n".join(lines)), ephemeral=True)
+
+
+class InviteStatsView(ui.LayoutView):
+    """Pillow invite-stats card with private detail actions."""
+    def __init__(self, card_file, guild_id: int, inviter_name: str, code_rows: list[dict]):
+        super().__init__(timeout=None)
+        self.file = card_file
+        self.guild_id = guild_id
+        self.inviter_name = inviter_name
+        self.code_rows = code_rows
+
+        codes_button = ui.Button(label="Invite Codes", style=discord.ButtonStyle.secondary)
+        invitees_button = ui.Button(label="Invited People", style=discord.ButtonStyle.secondary)
+        codes_button.callback = self.on_codes
+        invitees_button.callback = self.on_invitees
+
+        self.container = ui.Container(
+            ui.MediaGallery(discord.MediaGalleryItem(card_file)),
+            ui.ActionRow(codes_button, invitees_button),
+        )
+        self.add_item(self.container)
+
+    async def on_codes(self, interaction: discord.Interaction):
+        if not self.code_rows:
+            await interaction.response.send_message(
+                view=notice("No recorded invite codes were found for this member."),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            view=InviteCodeSelectView(self.guild_id, self.inviter_name, self.code_rows),
+            ephemeral=True,
+        )
+
+    async def on_invitees(self, interaction: discord.Interaction):
+        rows = await database.async_get_invitees(
+            self.guild_id, self.inviter_name, limit=25
+        )
+        lines = [f"## People invited by {self.inviter_name}", ""]
+        if rows:
+            for row in rows:
+                flag = " · new account" if row["account_age_days"] < 7 else ""
+                lines.append(f"• **{row['user_name']}** · {row['join_date']}{flag}")
+        else:
+            lines.append("*No invite records found.*")
+        await interaction.response.send_message(
+            view=SimpleLayout("\n".join(lines)),
+            ephemeral=True,
+        )
+
+
 class DashboardView(ui.LayoutView):
     def __init__(self, content_items: list | None = None):
         super().__init__(timeout=None)
 
         items = content_items or [ui.TextDisplay("Loading dashboard…")]
-        self.container = ui.Container(*items, accent_color=COLOR_BRAND)
+        self.container = ui.Container(*items)
 
         refresh_btn = ui.Button(label="Refresh Stats", style=discord.ButtonStyle.primary,
-                                 emoji="🔄", custom_id="btn_refresh_dashboard")
+                                 custom_id="btn_refresh_dashboard")
         refresh_btn.callback = self.on_refresh
 
         export_btn = ui.Button(label="Export History", style=discord.ButtonStyle.secondary,
-                                emoji="📥", custom_id="btn_export_csv")
+                                custom_id="btn_export_csv")
         export_btn.callback = self.on_export
 
         self.container.add_item(ui.ActionRow(refresh_btn, export_btn))
@@ -165,15 +259,15 @@ class GraphView(ui.LayoutView):
             placeholder="Choose time range for growth chart...",
             custom_id="select_graph_range",
             options=[
-                discord.SelectOption(label="Last 7 Days", value="7", emoji="📅", default=days == 7),
-                discord.SelectOption(label="Last 30 Days", value="30", emoji="📊", default=days == 30),
-                discord.SelectOption(label="Last 90 Days", value="90", emoji="📈", default=days == 90),
+                discord.SelectOption(label="Last 7 Days", value="7", default=days == 7),
+                discord.SelectOption(label="Last 30 Days", value="30", default=days == 30),
+                discord.SelectOption(label="Last 90 Days", value="90", default=days == 90),
             ],
         )
         self.range_select.callback = self.on_range_change
 
         self.container = ui.Container(
-            ui.TextDisplay(f"# 📈 GROWTH TRENDS — LAST {days} DAYS"),
+            ui.TextDisplay(f"# GROWTH TRENDS — LAST {days} DAYS"),
             ui.MediaGallery(discord.MediaGalleryItem(graph_file)),
             ui.ActionRow(self.range_select),
             ui.TextDisplay(footer_line("Visual Intelligence")),
