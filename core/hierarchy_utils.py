@@ -369,7 +369,14 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
 
     title_x = icon_x + icon_d + 24
     title_max = (pill_x0 - 330) - title_x        # leave room for the right-hand title
-    _draw_compat_text(draw, (s(title_x), s(88)), unicodedata.normalize("NFKC", guild.name or "Server"), s(40), True, (255, 255, 255), anchor="lm")
+    title_text = _compat_fit(
+        measure,
+        unicodedata.normalize("NFKC", guild.name or "Server"),
+        s(40),
+        True,
+        s(max(title_max, 200)),
+    )
+    _draw_compat_text(draw, (s(title_x), s(88)), title_text, s(40), True, (255, 255, 255), anchor="lm")
     _tracked_text(draw, s(title_x), s(126), "STAFF DIRECTORY", f_cap, MUTED, s(4))
 
     for (rgb, text), x0, width in zip(pills, pill_positions, pill_widths):
