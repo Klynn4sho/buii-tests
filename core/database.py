@@ -322,6 +322,30 @@ async def async_get_member_snapshot(guild_id, user_id):
     return await asyncio.to_thread(_raw_get_member_snapshot, guild_id, user_id)
 
 
+def _raw_search_member_snapshots(guild_id, query, limit=25):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        pattern = "%" + (query or "").strip() + "%"
+        cursor.execute('''
+            SELECT user_id, username, display_name, is_member
+            FROM member_snapshots
+            WHERE guild_id = %s
+              AND (CAST(user_id AS TEXT) ILIKE %s OR username ILIKE %s OR display_name ILIKE %s)
+            ORDER BY is_member DESC, display_name ASC
+            LIMIT %s;
+        ''', (guild_id, pattern, pattern, pattern, limit))
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    finally:
+        release_db_conn(conn)
+
+
+async def async_search_member_snapshots(guild_id, query, limit=25):
+    return await asyncio.to_thread(_raw_search_member_snapshots, guild_id, query, limit)
+
+
 def _raw_get_member_invite_summary(guild_id, user_id, inviter_names):
     conn = get_db_conn()
     try:
