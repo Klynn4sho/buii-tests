@@ -304,7 +304,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
             name = _compat_fit(measure, raw_name, s(17), True, s(150))
             if not name.strip("… "):
                 name = clean_display_text(m.name, "Member")
-            tw = measure.textlength(name, font=f_name) / SCALE
+            tw = _compat_width(measure, name, s(17), True) / SCALE
             w = avatar_d + name_gap + tw
             reserve = overflow_w if len(members) - i - 1 > 0 else 0
             if x + w + reserve <= avail_right:
