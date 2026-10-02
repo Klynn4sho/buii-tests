@@ -221,17 +221,19 @@ def _hgradient(w, h, rgb, a_start, a_end):
 def _background(w, h):
     strip = Image.new("RGBA", (1, h))
     px = strip.load()
-    top, bottom = (8, 8, 14), (13, 10, 21)
+    top, bottom = (5, 20, 24), (7, 11, 18)
     for y in range(h):
         t = y / max(h - 1, 1)
         px[0, y] = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3)) + (255,)
     bg = strip.resize((w, h))
 
-    # Soft purple glow top-left and a faint blue one bottom-right.
+    # Teal glass atmosphere: a cool upper glow, a cyan lower bloom, and
+    # barely-visible diagonal light bands behind the content.
     glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
-    gd.ellipse([-w * 0.18, -h * 0.40, w * 0.55, h * 0.30], fill=(96, 52, 180, 105))
-    gd.ellipse([w * 0.55, h * 0.70, w * 1.15, h * 1.25], fill=(40, 80, 190, 45))
+    gd.ellipse([-w * 0.20, -h * 0.42, w * 0.62, h * 0.34], fill=(35, 201, 185, 115))
+    gd.ellipse([w * 0.48, h * 0.62, w * 1.18, h * 1.22], fill=(28, 157, 180, 70))
+    gd.polygon([(0, h * 0.42), (w * 0.62, 0), (w * 0.82, 0), (w * 0.18, h * 0.56)], fill=(75, 230, 218, 22))
     glow = glow.filter(ImageFilter.GaussianBlur(s(120)))
     return Image.alpha_composite(bg, glow)
 
@@ -243,13 +245,16 @@ def _row_card(w, h, accent, strength):
     mask = Image.new("L", (w, h), 0)
     ImageDraw.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=255)
 
-    card = Image.new("RGBA", (w, h), (19, 19, 28, 255))
-    card = Image.alpha_composite(card, _hgradient(w, h, accent, int(72 * strength), 0))
+    glass = tuple(int(accent[i] * 0.38 + (45, 212, 191)[i] * 0.62) for i in range(3))
+    card = Image.new("RGBA", (w, h), (14, 31, 37, 226))
+    card = Image.alpha_composite(card, _hgradient(w, h, glass, int(70 * strength), 0))
 
     ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     od = ImageDraw.Draw(ov)
-    od.rounded_rectangle([0, 0, w - 1, h - 1], radius=radius,
-                          outline=(*accent, int(95 * strength) + 20), width=s(1))
+    od.rounded_rectangle([s(1), s(1), w - s(2), h - s(2)], radius=radius,
+                          fill=(31, 56, 61, 46),
+                          outline=(*glass, int(125 * strength) + 25), width=s(1))
+    od.line((s(18), s(2), w - s(18), s(2)), fill=(180, 255, 247, 48), width=s(1))
     card = Image.alpha_composite(card, ov)
     card.putalpha(ImageChops.multiply(card.getchannel("A"), mask))
     return card
@@ -335,6 +340,13 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     # ---- header: translucent bits first (pills, divider, icon ring)
     hov = Image.new("RGBA", img.size, (0, 0, 0, 0))
     hd = ImageDraw.Draw(hov)
+    hd.rounded_rectangle(
+        [s(margin), s(34), s(W - margin), s(154)],
+        radius=s(22),
+        fill=(20, 48, 53, 92),
+        outline=(91, 239, 222, 42),
+        width=s(1),
+    )
 
     pills = [((74, 222, 128), f"{len(staff_ids)} Staff"),
              ((129, 140, 248), f"{len(rows)} Tiers"),
@@ -353,7 +365,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
         pill_positions.append(px)
         px += width + pill_gap
 
-    hd.rectangle([s(margin), s(176), s(W - margin), s(176) + max(1, s(1))], fill=(255, 255, 255, 24))
+    hd.rectangle([s(margin + 20), s(176), s(W - margin - 20), s(176) + max(1, s(1))], fill=(104, 238, 224, 42))
     icon_d, icon_x, icon_y = 88, margin, 52
     hd.ellipse([s(icon_x - 3), s(icon_y - 3), s(icon_x + icon_d + 3), s(icon_y + icon_d + 3)],
                outline=(255, 255, 255, 70), width=s(1.5))
@@ -366,8 +378,8 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     else:
         ph = Image.new("RGBA", (s(icon_d), s(icon_d)), (88, 101, 242, 255))
         img.alpha_composite(_circle(ph, s(icon_d)), dest=(s(icon_x), s(icon_y)))
-        draw.text((s(icon_x + icon_d / 2), s(icon_y + icon_d / 2)), (guild.name[:1] or "?").upper(),
-                  font=f_title, fill=(255, 255, 255), anchor="mm")
+        draw.text((s(icon_x + icon_d / 2), s(icon_y + icon_d / 2)), (clean_guild_name[:1] or "?").upper(),
+                  font=f_title, fill=(225, 255, 251), anchor="mm")
 
     title_x = icon_x + icon_d + 24
     title_max = (pill_x0 - 330) - title_x        # leave room for the right-hand title
@@ -378,8 +390,8 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
         True,
         s(max(title_max, 200)),
     )
-    _draw_compat_text(draw, (s(title_x), s(88)), title_text, s(40), True, (255, 255, 255), anchor="lm")
-    _tracked_text(draw, s(title_x), s(126), "STAFF DIRECTORY", f_cap, MUTED, s(4))
+    _draw_compat_text(draw, (s(title_x), s(88)), title_text, s(40), True, (226, 255, 251), anchor="lm")
+    _tracked_text(draw, s(title_x), s(126), "STAFF DIRECTORY", f_cap, (116, 177, 180), s(4))
 
     for (rgb, text), x0, width in zip(pills, pill_positions, pill_widths):
         draw.ellipse([s(x0 + pill_pad), s(pill_cy - dot_d / 2), s(x0 + pill_pad + dot_d), s(pill_cy + dot_d / 2)],
@@ -389,7 +401,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
 
     heading = "SERVER HIERARCHY"
     heading_w = _tracked_width(measure, heading, f_tracked_lg, s(5)) / SCALE
-    _tracked_text(draw, s(pill_x0 - 28 - heading_w), s(pill_cy), heading, f_tracked_lg, (226, 227, 235), s(5))
+    _tracked_text(draw, s(pill_x0 - 28 - heading_w), s(pill_cy), heading, f_tracked_lg, (197, 246, 240), s(5))
 
     tagline = "ROLES  ·  PEOPLE  ·  STRUCTURE"
     tag_w = _tracked_width(measure, tagline, f_tracked_sm, s(4)) / SCALE
