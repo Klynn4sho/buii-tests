@@ -129,8 +129,10 @@ def _font_for_char(size: int, bold: bool, char: str):
 
 
 def _compat_chars(text: str) -> list[str]:
-    normalized = unicodedata.normalize("NFKC", str(text or ""))
-    return [char for char in normalized if not unicodedata.category(char).startswith("C")]
+    # Pillow's fallback font can draw unsupported characters as square tofu
+    # glyphs. Normalize decorative alphabets, then keep only characters the
+    # hierarchy card intentionally supports.
+    return list(clean_display_text(text, ""))
 
 
 def _compat_width(draw, text: str, size: int, bold: bool) -> int:
@@ -300,7 +302,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     for role, members, accent in rows:
         visible, x = [], avatar_start
         for i, m in enumerate(members):
-            raw_name = unicodedata.normalize("NFKC", m.display_name or "")
+            raw_name = clean_display_text(m.display_name or m.name, "Member")
             name = _compat_fit(measure, raw_name, s(17), True, s(150))
             if not name.strip("… "):
                 name = clean_display_text(m.name, "Member")
@@ -371,7 +373,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
     title_max = (pill_x0 - 330) - title_x        # leave room for the right-hand title
     title_text = _compat_fit(
         measure,
-        unicodedata.normalize("NFKC", guild.name or "Server"),
+        clean_guild_name,
         s(40),
         True,
         s(max(title_max, 200)),
@@ -412,7 +414,7 @@ async def build_hierarchy_image(guild: discord.Guild, staff_roles: list, session
                 img.alpha_composite(role_icon.resize((s(26), s(26)), Image.LANCZOS),
                                     dest=(s(name_x), s(y + 18)))
                 name_x += 34
-        raw_role_name = unicodedata.normalize("NFKC", role.name or "")
+        raw_role_name = clean_display_text(role.name, "Unnamed role")
         role_text = _compat_fit(measure, raw_role_name, s(22), True, s(170 - (name_x - (rx + 80))))
         if not role_text.strip("… "):
             role_text = clean_display_text(role.name, "Unnamed role")
