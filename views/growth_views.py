@@ -117,13 +117,14 @@ class InviteCodeSelectView(ui.LayoutView):
             f"## Invite Code: `{code}`",
             f"Invites: **{row['invite_count'] if row else len(invitees)}**",
             f"Flagged accounts: **{row['flagged_count'] if row else 0}**",
+            f"Invite link: https://discord.gg/{code}",
             "",
         ]
         if invitees:
             lines.append("**People invited**")
             for item in invitees:
                 flag = " · new account" if item["account_age_days"] < 7 else ""
-                lines.append(f"• **{item['user_name']}** · {item['join_date']}{flag}")
+                lines.append(f"• **{item['user_name']}** (`{item['user_id']}`) · {item['join_date']} · {item['account_age_days']}d{flag}")
         else:
             lines.append("*No invite records found for this code.*")
         await interaction.response.send_message(view=SimpleLayout("\n".join(lines)), ephemeral=True)
