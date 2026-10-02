@@ -108,6 +108,55 @@ async def build_dashboard_content_items(guild: discord.Guild) -> list:
 
 
 # ==========================================================================
+# Pillow growth dashboard card
+# ==========================================================================
+
+
+async def create_growth_dashboard_card(guild: discord.Guild, total: int, day_count: int,
+                                       risk_count: int, codes: list):
+    """Render the statspanel as a border-matched Pillow card."""
+    W, H = 1200, 650
+    bg, panel = "#0F1013", "#1B1D22"
+    white, muted, accent = "#F2F3F5", "#A7ADB7", "#6574F5"
+    card = Image.new("RGB", (W, H), bg)
+    draw = ImageDraw.Draw(card)
+    draw.rounded_rectangle([12, 12, W - 12, H - 12], radius=24, fill=panel, outline=accent, width=4)
+
+    title_font = get_font(40, bold=True)
+    draw.text((48, 42), _truncate_to_width(draw, f"{guild.name} Growth Dashboard", title_font, 930),
+              fill=white, font=title_font)
+    draw.text((48, 96), "LIVE SERVER MONITOR  ·  refreshes every 60 minutes", fill=muted, font=get_font(19))
+
+    stats = [
+        ("TOTAL JOINS", str(total)),
+        ("LAST 24 HOURS", str(day_count)),
+        ("NEW ACCOUNTS", str(risk_count)),
+        ("SERVER MEMBERS", str(guild.member_count)),
+    ]
+    for (label, value), x in zip(stats, (48, 310, 572, 834)):
+        draw.text((x, 170), label, fill=accent, font=get_font(15, bold=True))
+        draw.text((x, 201), value, fill=white, font=get_font(30, bold=True))
+
+    draw.text((48, 285), "TOP INVITE CODES", fill=accent, font=get_font(17, bold=True))
+    y = 326
+    if codes:
+        for index, row in enumerate(codes[:5], start=1):
+            line = f"{index:02d}. {row[0]}  ·  {row[1]} click{'s' if row[1] != 1 else ''}"
+            draw.text((48, y), _truncate_to_width(draw, line, get_font(21), W - 96), fill=white, font=get_font(21))
+            y += 36
+    else:
+        draw.text((48, y), "No custom invite links tracked yet.", fill=muted, font=get_font(20))
+
+    draw.line((48, 545, W - 48, 545), fill="#343740", width=2)
+    draw.text((48, 570), "Use the selector below for invite-code details.", fill=muted, font=get_font(18))
+
+    buf = io.BytesIO()
+    card.save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    return buf
+
+
+# ==========================================================================
 # Join growth graph (matplotlib)
 # ==========================================================================
 
@@ -115,41 +164,52 @@ async def build_joins_graph_async(guild_id, days=30):
     series = await database.async_get_daily_join_counts(guild_id, days)
 
     def _draw():
-        dates = [d for d, _ in series]
-        counts = [c for _, c in series]
+        W, H = 1200, 620
+        bg = ImageColor.getrgb(GRAPH_BG)
+        grid = ImageColor.getrgb(GRAPH_GRID)
+        text_color = ImageColor.getrgb(GRAPH_TEXT)
+        accent = ImageColor.getrgb(GRAPH_ACCENT)
+        fill = ImageColor.getrgb(GRAPH_FILL)
+        img = Image.new("RGB", (W, H), bg)
+        draw = ImageDraw.Draw(img)
 
-        fig, ax = plt.subplots(figsize=(8.5, 4.2), dpi=180)
-        fig.patch.set_facecolor(GRAPH_BG)
-        ax.set_facecolor(GRAPH_BG)
+        left, top, right, bottom = 92, 92, W - 48, H - 88
+        counts = [count for _, count in series]
+        max_count = max(max(counts, default=0), 1)
+        plot_w, plot_h = right - left, bottom - top
 
-        ax.plot(dates, counts, color=GRAPH_ACCENT, linewidth=2.8, marker="o",
-                markersize=5, markerfacecolor="#FFFFFF", markeredgecolor=GRAPH_ACCENT, markeredgewidth=2)
-        ax.fill_between(dates, counts, color=GRAPH_FILL, alpha=0.18)
+        draw.text((left, 30), f"SERVER GROWTH TREND — LAST {days} DAYS",
+                  fill=text_color, font=get_font(24, bold=True))
+        draw.text((22, top + plot_h // 2), "NEW JOINS", fill=text_color,
+                  font=get_font(16, bold=True))
 
-        ax.set_title(f"SERVER GROWTH TREND — LAST {days} DAYS", fontsize=11, fontweight="bold", color=GRAPH_TEXT, pad=14, loc="left")
-        ax.set_ylabel("NEW JOINS", color=GRAPH_TEXT, fontsize=9, fontweight="bold")
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
-        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=8))
+        for tick in range(max_count + 1):
+            y = bottom - int(plot_h * tick / max_count)
+            draw.line((left, y, right, y), fill=grid, width=1)
+            draw.text((left - 48, y - 10), str(tick), fill=text_color, font=get_font(15))
 
-        ax.tick_params(colors=GRAPH_TEXT, labelsize=8.5)
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.grid(axis="y", color=GRAPH_GRID, linestyle="--", alpha=0.5, linewidth=0.7)
-        ax.set_axisbelow(True)
+        points = []
+        for index, (_, count) in enumerate(series):
+            x = left + int(plot_w * index / max(len(series) - 1, 1))
+            y = bottom - int(plot_h * count / max_count)
+            points.append((x, y))
 
-        for spine_name, spine in ax.spines.items():
-            if spine_name == "bottom":
-                spine.set_color(GRAPH_GRID)
-                spine.set_linewidth(1)
-            else:
-                spine.set_visible(False)
+        if len(points) > 1:
+            fill_points = [(points[0][0], bottom), *points, (points[-1][0], bottom)]
+            draw.polygon(fill_points, fill=tuple(int((a + b) / 2) for a, b in zip(fill, bg)))
+            draw.line(points, fill=accent, width=5, joint="curve")
+        for x, y in points:
+            draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill=bg, outline=accent, width=3)
 
-        ax.set_ylim(bottom=0)
-        fig.autofmt_xdate()
-        fig.tight_layout()
+        label_step = max(1, len(series) // 6)
+        for index in range(0, len(series), label_step):
+            date = series[index][0]
+            x = left + int(plot_w * index / max(len(series) - 1, 1))
+            draw.text((x - 28, bottom + 18), date.strftime("%b %d"), fill=text_color, font=get_font(15))
 
+        draw.line((left, bottom, right, bottom), fill=grid, width=2)
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", facecolor=GRAPH_BG, bbox_inches="tight")
-        plt.close(fig)
+        img.save(buf, format="PNG", optimize=True)
         buf.seek(0)
         return discord.File(fp=buf, filename="joins_graph.png")
 
