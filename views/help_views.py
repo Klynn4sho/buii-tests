@@ -271,7 +271,7 @@ class HelpView(ui.LayoutView):
         )
 
         return [
-            self._header("📖 Buii — Help", f"Home · for {name}"),
+            self._header("Buii — Help", f"Home · for {name}"),
             ui.Separator(),
             ui.TextDisplay(greeting),
             self._small_sep(),
@@ -291,12 +291,12 @@ class HelpView(ui.LayoutView):
 
         if self.mode == "category":
             cat = self._category(self.category)
-            title = f"{cat.emoji} {cat.label}"
+            title = cat.label
             crumb = f"Home › {cat.label}{page_label} · {len(entries)} commands"
             empty = "*No commands in this category.*"
         else:
             shown = discord.utils.escape_markdown(self.query[:40])
-            title = "🔍︎ Search"
+            title = "Search"
             crumb = f"Home › Search “{shown}”{page_label} · {len(entries)} result{'s' if len(entries) != 1 else ''}"
             empty = f"*No commands matched **{shown}**. Try a shorter name.*"
 
@@ -310,7 +310,7 @@ class HelpView(ui.LayoutView):
     def _category_select(self) -> ui.Select:
         options = [
             discord.SelectOption(
-                label=c.label, value=c.key, emoji=c.emoji,
+                label=c.label, value=c.key,
                 description=f"{len(self.catalog[c.key])} command{'s' if len(self.catalog[c.key]) != 1 else ''}",
                 default=(self.mode == "category" and self.category == c.key),
             )
@@ -328,11 +328,11 @@ class HelpView(ui.LayoutView):
         in_list = self.mode != "home"
         pages = self._page_count()
 
-        home = ui.Button(label="🏠︎ Home", style=discord.ButtonStyle.secondary, disabled=not in_list)
+        home = ui.Button(label="Home", style=discord.ButtonStyle.secondary, disabled=not in_list)
         prev = ui.Button(label="◀", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page <= 0))
         nxt = ui.Button(label="▶", style=discord.ButtonStyle.secondary, disabled=(not in_list or self.page >= pages - 1))
-        search = ui.Button(label="🔍︎ Search", style=discord.ButtonStyle.primary)
-        close = ui.Button(label="✕ Close", style=discord.ButtonStyle.danger)
+        search = ui.Button(label="Search", style=discord.ButtonStyle.primary)
+        close = ui.Button(label="Close", style=discord.ButtonStyle.danger)
 
         home.callback = self.on_home
         prev.callback = self.on_prev
