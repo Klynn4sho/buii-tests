@@ -11,6 +11,7 @@ listings, rating inspection, the duplicate notice. Config confirmations,
 errors and one-line replies are plain, un-accented containers.
 """
 
+import asyncio
 from datetime import datetime, timezone, timedelta
 
 import discord
@@ -33,6 +34,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._ready_once = False
+        self.spotify_sync_lock = asyncio.Lock()
 
     async def cog_load(self):
         for row in await database.get_recent_songs(limit=500):
@@ -71,9 +73,14 @@ class MusicCog(commands.Cog, name="MusicCog"):
         if votes <= 4 or average < 7.0:
             return False
 
-        if await sync_to_spotify(self.bot.http_session, song["url"]):
-            await database.mark_song_synced(guild_id, song_id)
-            return True
+        # Prevent concurrent expiry/manual syncs from adding the same track twice.
+        async with self.spotify_sync_lock:
+            latest = await database.get_song(guild_id, song_id)
+            if not latest or latest.get("synced"):
+                return False
+            if await sync_to_spotify(self.bot.http_session, latest["url"]):
+                await database.mark_song_synced(guild_id, song_id)
+                return True
         return False
 
     # ------------------------------------------------------------------
@@ -95,8 +102,10 @@ class MusicCog(commands.Cog, name="MusicCog"):
                         await message.edit(view=ClosedRatingView())
                     except Exception:
                         pass
-        except Exception:
-            pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            print(f"[music] expiry sweep failed: {error!r}")
 
     @expiry_sweep_loop.before_loop
     async def before_expiry_sweep_loop(self):
