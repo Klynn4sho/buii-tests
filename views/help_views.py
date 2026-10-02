@@ -48,6 +48,7 @@ CATEGORIES = (
     Category("music", "🎵", "Music", "MusicCog", "rate tracks, leaderboards & Spotify sync"),
     Category("growth", "🔗", "Invites & Growth", "GrowthCog", "invite tracking, join alerts & analytics"),
     Category("staff", "🪪", "Staff Directory", "HierarchyCog", "role hierarchy image"),
+    Category("server", "🖥️", "Server Information", "ServerInfoCog", "server overview & member totals"),
     Category("admin", "🛠️", "Admin & Tools", "AdminCog", "help & slash-command sync"),
 )
 OTHER = Category("other", "📦", "Other", "", "everything else")
