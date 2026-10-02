@@ -25,8 +25,8 @@ from core import database
 from core.checks import has_mod_permission
 from core.components import SimpleLayout, Layout, footer_line, notice
 from core.config import COLOR_BRAND, COLOR_DANGER, COLOR_WARNING, COLOR_SUCCESS
-from core.helpers import make_bar, account_maturity_bar, build_joins_graph_async, create_join_card
-from views.growth_views import DashboardView, GraphView, JoinAlertView, JoinValueButton
+from core.helpers import make_bar, account_maturity_bar, build_joins_graph_async, create_join_card, create_invite_stats_card
+from views.growth_views import DashboardView, GraphView, JoinAlertView, JoinValueButton, InviteStatsView
 
 
 def _risk_status(account_age_days: int) -> str:
@@ -246,17 +246,19 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
     async def leaderboard(self, ctx: commands.Context):
         results = await database.async_get_leaderboard(ctx.guild.id, limit=10)
 
-        text = "# 🏆 INVITER LEADERBOARD\n-# Top server inviters ranked by recorded join history.\n\n"
+        lines = [
+            "## INVITER LEADERBOARD",
+            "-# Ranked by recorded server joins.",
+            "",
+        ]
         if results:
-            medals = ["🥇", "🥈", "🥉"]
-            lines = [f"{medals[idx] if idx < 3 else f'`#{idx+1}`'} **{name}** — **{count} joins**"
-                     for idx, (name, count) in enumerate(results)]
-            text += "\n".join(lines)
+            for index, (name, count) in enumerate(results, start=1):
+                lines.append(f"**{index:02d}.** **{name}**  ·  **{count}** join{'s' if count != 1 else ''}")
         else:
-            text += "*No tracked join data available yet.*"
-        text += "\n" + footer_line("Leaderboard Metrics")
+            lines.append("*No tracked join data available yet.*")
+        lines.extend(["", footer_line("Server Growth")])
 
-        await ctx.send(view=SimpleLayout(text, accent=COLOR_BRAND))
+        await ctx.send(view=SimpleLayout("\n".join(lines)))
 
     @commands.hybrid_command(name="invites", description="View a member's invite history and stats.")
     async def invites(self, ctx: commands.Context, member: discord.Member = None):
