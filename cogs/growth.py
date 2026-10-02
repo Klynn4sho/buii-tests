@@ -15,6 +15,7 @@ plain, un-accented containers.
 
 import asyncio
 import io
+import random
 from datetime import datetime, timezone
 
 import discord
@@ -51,6 +52,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         self.invites_cache: dict[int, dict[str, int]] = {}
         self.invite_locks: dict[int, asyncio.Lock] = {}
         self._ready_once = False
+        self.member_snapshot_task: asyncio.Task | None = None
 
     async def cog_load(self):
         # Persistent-view registration is purely local dispatch-table
@@ -66,6 +68,49 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
 
     def cog_unload(self):
         self.panel_refresh_loop.cancel()
+        if self.member_snapshot_task:
+            self.member_snapshot_task.cancel()
+
+    async def snapshot_member(self, member: discord.Member, is_member: bool = True):
+        roles = [role.name for role in member.roles if not role.is_default()]
+        badges = []
+        try:
+            for item in member.public_flags.all():
+                if isinstance(item, tuple):
+                    name, enabled = item
+                    if enabled:
+                        badges.append(str(name).replace("_", " ").title())
+                else:
+                    name = getattr(item, "name", str(item))
+                    badges.append(str(name).replace("_", " ").title())
+        except Exception:
+            pass
+
+        await database.async_upsert_member_snapshot(
+            member.guild.id,
+            member.id,
+            member.name,
+            member.display_name,
+            member.display_avatar.url,
+            member.created_at,
+            member.joined_at,
+            member.premium_since is not None,
+            roles,
+            badges,
+            is_member=is_member,
+        )
+
+    async def member_snapshot_loop(self):
+        while True:
+            try:
+                for guild in self.bot.guilds:
+                    for member in guild.members:
+                        await self.snapshot_member(member)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                print(f"[growth] member snapshot refresh failed: {error!r}")
+            await asyncio.sleep(random.uniform(13 * 3600, 24 * 3600))
 
     # ------------------------------------------------------------------
     # Background loop: refresh every live dashboard panel once an hour
@@ -105,6 +150,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         if not self._ready_once:
             self._ready_once = True
             self.panel_refresh_loop.start()
+            self.member_snapshot_task = asyncio.create_task(self.member_snapshot_loop())
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
@@ -127,6 +173,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         guild = member.guild
+        await self.snapshot_member(member)
 
         log_channel_id = await database.async_get_guild_log_channel(guild.id)
         if log_channel_id:
@@ -203,6 +250,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
+        await self.snapshot_member(member, is_member=False)
         await database.async_save_leave(member.guild.id, member.id)
 
     # ------------------------------------------------------------------
@@ -259,6 +307,90 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         lines.extend(["", footer_line("Server Growth")])
 
         await ctx.send(view=SimpleLayout("\n".join(lines)))
+
+    @commands.hybrid_command(
+        name="userinfo",
+        aliases=["user"],
+        description="View saved profile and membership information for a user.",
+    )
+    @discord.app_commands.describe(user="The user to inspect")
+    async def userinfo(self, ctx: commands.Context, user: discord.User = None):
+        target = user or ctx.author
+        live_member = ctx.guild.get_member(target.id) if ctx.guild else None
+        if live_member:
+            await self.snapshot_member(live_member)
+            target_name = live_member.name
+            display_name = live_member.display_name
+        else:
+            target_name = getattr(target, "name", str(target))
+            display_name = getattr(target, "display_name", target_name)
+
+        snapshot = await database.async_get_member_snapshot(ctx.guild.id, target.id) if ctx.guild else None
+        names = [target_name, display_name]
+        if snapshot:
+            names.extend([snapshot.get("username"), snapshot.get("display_name")])
+        latest_join, invite_count = await database.async_get_member_invite_summary(
+            ctx.guild.id, target.id, names
+        )
+
+        created_at = getattr(target, "created_at", None) or (snapshot or {}).get("created_at")
+        joined_at = (
+            (live_member.joined_at if live_member else None)
+            or (snapshot or {}).get("joined_at")
+            or (latest_join or {}).get("join_date")
+        )
+        avatar_url = (
+            live_member.display_avatar.url if live_member
+            else (snapshot or {}).get("avatar_url")
+            or getattr(target.display_avatar, "url", None)
+        )
+
+        def stamp(value):
+            if hasattr(value, "strftime"):
+                return value.strftime("%d %b %Y, %H:%M UTC")
+            return str(value) if value else "Unknown"
+
+        roles = (snapshot or {}).get("roles") or []
+        badges = (snapshot or {}).get("badges") or []
+        role_text = ", ".join(roles) if roles else "None recorded"
+        badge_text = ", ".join(badges) if badges else "None recorded"
+        if len(role_text) > 850:
+            role_text = role_text[:847] + "..."
+        if len(badge_text) > 350:
+            badge_text = badge_text[:347] + "..."
+
+        status = "✅ In this server" if live_member else "⚪ Not currently in this server"
+        boosting = live_member.premium_since is not None if live_member else bool((snapshot or {}).get("boosting"))
+        inviter = (latest_join or {}).get("inviter_name") or "Unknown"
+        invite_code = (latest_join or {}).get("invite_code") or "Unknown"
+        join_age = (latest_join or {}).get("account_age_days")
+        join_detail = f"{join_age} days old at join" if join_age is not None else "No join record"
+
+        text = (
+            f"## {display_name}\n"
+            f"-# @{target_name}\n\n"
+            f"**Membership**  ·  {status}\n"
+            f"**Created**  ·  {stamp(created_at)}\n"
+            f"**Joined**  ·  {stamp(joined_at)}\n"
+            f"**Boosting**  ·  {'✅ Yes' if boosting else 'No'}\n\n"
+            f"**Invited by**  ·  {inviter}\n"
+            f"**Invite code**  ·  {invite_code}\n"
+            f"**Invites**  ·  {invite_count}\n"
+            f"-# {join_detail}\n\n"
+            f"**Badges**\n{badge_text}\n\n"
+            f"**Roles**\n{role_text}\n\n"
+            + footer_line(f"Last saved {stamp((snapshot or {}).get('last_seen_at'))}")
+        )
+
+        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=avatar_url))]
+        items.append(ui.ActionRow(
+            ui.Button(
+                label="View Profile",
+                style=discord.ButtonStyle.link,
+                url=f"https://discord.com/users/{target.id}",
+            )
+        ))
+        await ctx.send(view=Layout(*items), ephemeral=bool(ctx.interaction))
 
     @commands.hybrid_command(name="invites", description="View a member's invite history and stats.")
     async def invites(self, ctx: commands.Context, member: discord.Member = None):
