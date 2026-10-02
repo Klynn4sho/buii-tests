@@ -16,6 +16,7 @@ plain, un-accented containers.
 import asyncio
 import io
 import random
+import re
 from datetime import datetime, timezone
 
 import discord
@@ -44,6 +45,33 @@ def _risk_color(account_age_days: int) -> discord.Color:
     elif account_age_days < 30:
         return COLOR_WARNING
     return COLOR_SUCCESS
+
+
+async def userinfo_autocomplete(interaction: discord.Interaction, current: str):
+    if not interaction.guild:
+        return []
+    query = current.strip().lower()
+    choices = []
+    seen = set()
+    members = sorted(interaction.guild.members, key=lambda m: (not m.display_name.lower().startswith(query), m.display_name.lower()))
+    for member in members:
+        if query and query not in member.display_name.lower() and query not in member.name.lower() and query not in str(member.id):
+            continue
+        choices.append(discord.app_commands.Choice(name=f'{member.display_name} (@{member.name})'[:100], value=str(member.id)))
+        seen.add(member.id)
+        if len(choices) >= 25:
+            return choices
+    saved = await database.async_search_member_snapshots(interaction.guild.id, query, limit=25)
+    for row in saved:
+        user_id = int(row['user_id'])
+        if user_id in seen:
+            continue
+        label = row['display_name'] or row['username'] or str(user_id)
+        status = 'in server' if row['is_member'] else 'saved record'
+        choices.append(discord.app_commands.Choice(name=f'{label} · {status}'[:100], value=str(user_id)))
+        if len(choices) >= 25:
+            break
+    return choices
 
 
 class GrowthCog(commands.Cog, name="GrowthCog"):
@@ -104,7 +132,11 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         while True:
             try:
                 for guild in self.bot.guilds:
-                    for member in guild.members:
+                    try:
+                        members = [member async for member in guild.fetch_members(limit=None)]
+                    except (discord.Forbidden, discord.HTTPException):
+                        members = guild.members
+                    for member in members:
                         await self.snapshot_member(member)
             except asyncio.CancelledError:
                 raise
@@ -309,89 +341,99 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         await ctx.send(view=SimpleLayout("\n".join(lines)))
 
     @commands.hybrid_command(
-        name="userinfo",
-        aliases=["user"],
-        description="View saved profile and membership information for a user.",
+        name='userinfo',
+        aliases=['user'],
+        description='View saved profile and membership information for a user.',
     )
-    @discord.app_commands.describe(user="The user to inspect")
-    async def userinfo(self, ctx: commands.Context, user: discord.User = None):
-        target = user or ctx.author
-        live_member = ctx.guild.get_member(target.id) if ctx.guild else None
+    @discord.app_commands.describe(user='Search a member or paste a user ID')
+    @discord.app_commands.autocomplete(user=userinfo_autocomplete)
+    async def userinfo(self, ctx: commands.Context, user: str = None):
+        raw_user = str(user or ctx.author.id)
+        id_match = re.search(r'(\d{15,22})', raw_user)
+        if not id_match:
+            await ctx.send(view=notice('❌ Enter a member search result, mention, or numeric user ID.'), ephemeral=bool(ctx.interaction))
+            return
+
+        user_id = int(id_match.group(1))
+        live_member = ctx.guild.get_member(user_id) if ctx.guild else None
         if live_member:
             await self.snapshot_member(live_member)
-            target_name = live_member.name
-            display_name = live_member.display_name
-        else:
-            target_name = getattr(target, "name", str(target))
-            display_name = getattr(target, "display_name", target_name)
+        snapshot = await database.async_get_member_snapshot(ctx.guild.id, user_id) if ctx.guild else None
+        try:
+            target = live_member or await self.bot.fetch_user(user_id)
+        except (discord.NotFound, discord.HTTPException):
+            target = None
 
-        snapshot = await database.async_get_member_snapshot(ctx.guild.id, target.id) if ctx.guild else None
+        target_name = getattr(target, 'name', None) or (snapshot or {}).get('username') or str(user_id)
+        display_name = getattr(target, 'display_name', None) or (snapshot or {}).get('display_name') or target_name
         names = [target_name, display_name]
         if snapshot:
-            names.extend([snapshot.get("username"), snapshot.get("display_name")])
-        latest_join, invite_count = await database.async_get_member_invite_summary(
-            ctx.guild.id, target.id, names
-        )
+            names.extend([snapshot.get('username'), snapshot.get('display_name')])
+        latest_join, invite_count = await database.async_get_member_invite_summary(ctx.guild.id, user_id, names)
 
-        created_at = getattr(target, "created_at", None) or (snapshot or {}).get("created_at")
-        joined_at = (
-            (live_member.joined_at if live_member else None)
-            or (snapshot or {}).get("joined_at")
-            or (latest_join or {}).get("join_date")
-        )
-        avatar_url = (
-            live_member.display_avatar.url if live_member
-            else (snapshot or {}).get("avatar_url")
-            or getattr(target.display_avatar, "url", None)
-        )
+        created_at = getattr(target, 'created_at', None) or (snapshot or {}).get('created_at')
+        joined_at = ((live_member.joined_at if live_member else None) or (snapshot or {}).get('joined_at') or (latest_join or {}).get('join_date'))
+        avatar_url = (live_member.display_avatar.url if live_member else (snapshot or {}).get('avatar_url') or (getattr(target, 'display_avatar', None).url if target else None))
+        avatar_url = avatar_url or 'https://cdn.discordapp.com/embed/avatars/0.png'
 
         def stamp(value):
-            if hasattr(value, "strftime"):
-                return value.strftime("%d %b %Y, %H:%M UTC")
-            return str(value) if value else "Unknown"
+            if isinstance(value, str):
+                try:
+                    value = datetime.strptime(value, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                except ValueError:
+                    return value
+            if hasattr(value, 'timestamp'):
+                return f'<t:{int(value.timestamp())}:R>'
+            return 'Unknown'
 
-        roles = (snapshot or {}).get("roles") or []
-        badges = (snapshot or {}).get("badges") or []
-        role_text = ", ".join(roles) if roles else "None recorded"
-        badge_text = ", ".join(badges) if badges else "None recorded"
+        roles = (snapshot or {}).get('roles') or []
+        badges = (snapshot or {}).get('badges') or []
+        role_text = ', '.join(roles) if roles else 'None recorded'
+        badge_text = ', '.join(badges) if badges else 'None recorded'
         if len(role_text) > 850:
-            role_text = role_text[:847] + "..."
+            role_text = role_text[:847] + '...'
         if len(badge_text) > 350:
-            badge_text = badge_text[:347] + "..."
+            badge_text = badge_text[:347] + '...'
+        status = '✅ In this server' if live_member else '⚪ Not currently in this server'
+        boosting = live_member.premium_since is not None if live_member else bool((snapshot or {}).get('boosting'))
+        inviter = (latest_join or {}).get('inviter_name') or 'Unknown'
+        invite_code = (latest_join or {}).get('invite_code') or 'Unknown'
+        join_age = (latest_join or {}).get('account_age_days')
+        join_detail = f'{join_age} days old at join' if join_age is not None else 'No join record'
 
-        status = "✅ In this server" if live_member else "⚪ Not currently in this server"
-        boosting = live_member.premium_since is not None if live_member else bool((snapshot or {}).get("boosting"))
-        inviter = (latest_join or {}).get("inviter_name") or "Unknown"
-        invite_code = (latest_join or {}).get("invite_code") or "Unknown"
-        join_age = (latest_join or {}).get("account_age_days")
-        join_detail = f"{join_age} days old at join" if join_age is not None else "No join record"
-
-        text = (
-            f"## {display_name}\n"
-            f"-# @{target_name}\n\n"
-            f"**Membership**  ·  {status}\n"
-            f"**Created**  ·  {stamp(created_at)}\n"
-            f"**Joined**  ·  {stamp(joined_at)}\n"
-            f"**Boosting**  ·  {'✅ Yes' if boosting else 'No'}\n\n"
-            f"**Invited by**  ·  {inviter}\n"
-            f"**Invite code**  ·  {invite_code}\n"
-            f"**Invites**  ·  {invite_count}\n"
-            f"-# {join_detail}\n\n"
-            f"**Badges**\n{badge_text}\n\n"
-            f"**Roles**\n{role_text}\n\n"
-            + footer_line(f"Last saved {stamp((snapshot or {}).get('last_seen_at'))}")
+        header = ui.Section(
+            ui.TextDisplay(f'## **{display_name}**\n-# <@{user_id}> · @{target_name}'),
+            accessory=ui.Thumbnail(media=avatar_url),
         )
-
-        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=avatar_url))]
-        items.append(ui.ActionRow(
-            ui.Button(
-                label="View Profile",
-                style=discord.ButtonStyle.link,
-                url=f"https://discord.com/users/{target.id}",
-            )
-        ))
+        summary = ui.TextDisplay(
+            f'**Membership**  ·  {status}\n'
+            f'**Created**  ·  {stamp(created_at)}\n'
+            f'**Joined**  ·  {stamp(joined_at)}\n'
+            f'**Boosting**  ·  {"✅ Yes" if boosting else "No"}'
+        )
+        invites = ui.TextDisplay(
+            f'**Invited by**  ·  {inviter}\n'
+            f'**Invite code**  ·  {invite_code}\n'
+            f'**Invites**  ·  {invite_count}\n'
+            f'-# {join_detail}'
+        )
+        details = ui.TextDisplay(
+            f'**Badges**\n{badge_text}\n\n'
+            f'**Roles**\n{role_text}\n\n'
+            f'**User ID**  ·  `{user_id}`'
+        )
+        items = [
+            header,
+            ui.Separator(spacing=discord.SeparatorSpacing.small),
+            summary,
+            ui.Separator(spacing=discord.SeparatorSpacing.small),
+            invites,
+            ui.Separator(spacing=discord.SeparatorSpacing.small),
+            details,
+            ui.TextDisplay(footer_line(f'Last saved {stamp((snapshot or {}).get("last_seen_at"))}')),
+            ui.ActionRow(ui.Button(label='View Profile', style=discord.ButtonStyle.link, url=f'https://discord.com/users/{user_id}')),
+        ]
         await ctx.send(view=Layout(*items), ephemeral=bool(ctx.interaction))
-
     @commands.hybrid_command(name="invites", description="View a member's invite history and stats.")
     async def invites(self, ctx: commands.Context, member: discord.Member = None):
         member = member or ctx.author
