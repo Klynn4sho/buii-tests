@@ -214,7 +214,7 @@
               <div class="automation-heading"><div><h2>Join log channel</h2><span class="automation-status" id="cfgLogStatus">—</span></div></div>
               <p>Where join-risk alerts get posted. Falls back to a channel literally named #welcome if unset.</p>
               <div class="config-field">
-                <select id="cfgLogChannel"><option value="">— none —</option></select>
+                <select hidden id="cfgLogChannel"><option value="">— none —</option></select>
                 <button class="small-button" data-save-field="log_channel_id">Save</button>
               </div>
             </div>
@@ -226,7 +226,7 @@
               <div class="automation-heading"><div><h2>Alert role</h2><span class="automation-status" id="cfgAlertStatus">—</span></div></div>
               <p>Pinged when an account under 7 days old joins.</p>
               <div class="config-field">
-                <select id="cfgAlertRole"><option value="">— none —</option></select>
+                <select hidden id="cfgAlertRole"><option value="">— none —</option></select>
                 <button class="small-button" data-save-field="alert_role_id">Save</button>
               </div>
             </div>
@@ -238,7 +238,7 @@
               <div class="automation-heading"><div><h2>Mod role</h2><span class="automation-status" id="cfgModStatus">—</span></div></div>
               <p>Can use config commands without needing full Manage Server.</p>
               <div class="config-field">
-                <select id="cfgModRole"><option value="">— none —</option></select>
+                <select hidden id="cfgModRole"><option value="">— none —</option></select>
                 <button class="small-button" data-save-field="mod_role_id">Save</button>
               </div>
             </div>
@@ -250,7 +250,7 @@
               <div class="automation-heading"><div><h2>Music channel</h2><span class="automation-status" id="cfgMusicChanStatus">—</span></div></div>
               <p>Restricts music-link detection to one channel. Leave unset to allow any channel.</p>
               <div class="config-field">
-                <select id="cfgMusicChannel"><option value="">— any channel —</option></select>
+                <select hidden id="cfgMusicChannel"><option value="">— any channel —</option></select>
                 <button class="small-button" data-save-field="music_channel_id">Save</button>
               </div>
             </div>
@@ -262,7 +262,7 @@
               <div class="automation-heading"><div><h2>Music ping role</h2><span class="automation-status" id="cfgMusicRoleStatus">—</span></div></div>
               <p>Pinged whenever a new song is posted for rating.</p>
               <div class="config-field">
-                <select id="cfgMusicRole"><option value="">— none —</option></select>
+                <select hidden id="cfgMusicRole"><option value="">— none —</option></select>
                 <button class="small-button" data-save-field="music_role_id">Save</button>
               </div>
             </div>
@@ -290,7 +290,7 @@
             <h1>Statistics</h1>
             <p>Real numbers from BUII's own database and live connection — nothing here is simulated.</p>
           </div>
-          <select class="period-select" id="growthPeriod">
+          <select hidden class="period-select" id="growthPeriod">
             <option value="30">Last 30 days</option>
             <option value="7">Last 7 days</option>
             <option value="90">Last 90 days</option>
