@@ -203,6 +203,7 @@ function selectServer(id) {
   }
   currentGuildId = id;
   localStorage.setItem("buii-last-guild", id);
+  applyPanelPrefs();
   document.querySelectorAll(".server").forEach(el => el.classList.toggle("active", el.dataset.guild === id));
   const g = currentGuilds.find(guild => guild.id === id);
   if (g) {
@@ -627,6 +628,7 @@ function applyAnalyticsView(view = "overview") {
     const customHidden = child.dataset.customHidden === "true";
     child.hidden = customHidden || !inView;
   });
+  if (typeof applyPanelLayout === "function") applyPanelLayout();
   const title = document.getElementById("statsPageTitle");
   const subtitle = document.getElementById("statsPageSubtitle");
   const copy = {
@@ -774,6 +776,10 @@ const closePanelCustomizer = document.getElementById("closePanelCustomizer");
 const resetPanelsButton = document.getElementById("resetPanelsButton");
 const PANEL_PREFS_KEY = "buii-analytics-panels";
 
+function panelStorageKey() {
+  return `${PANEL_PREFS_KEY}:${currentGuildId || "default"}`;
+}
+
 function analyticsPanels() {
   return [...document.querySelectorAll("#page-stats .stats-grid > .card:not(.analytics-number):not(.analytics-detail)")];
 }
@@ -782,23 +788,66 @@ function panelTitle(card, index) {
   return card.querySelector("h2")?.textContent?.trim() || `Panel ${index + 1}`;
 }
 
+function panelKey(card, index) {
+  if (!card.dataset.panelKey) {
+    const slug = panelTitle(card, index).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    card.dataset.panelKey = `panel-${slug || index}`;
+  }
+  return card.dataset.panelKey;
+}
+
 function readPanelPrefs() {
   try {
-    const value = JSON.parse(localStorage.getItem(PANEL_PREFS_KEY) || "{}");
-    return value && typeof value === "object" ? value : {};
+    const value = JSON.parse(localStorage.getItem(panelStorageKey()) || "{}");
+    return {
+      hidden: value.hidden && typeof value.hidden === "object" ? value.hidden : {},
+      pinned: value.pinned && typeof value.pinned === "object" ? value.pinned : {},
+      order: value.order && typeof value.order === "object" ? value.order : {},
+    };
   } catch (_) {
-    return {};
+    return { hidden: {}, pinned: {}, order: {} };
   }
+}
+
+function writePanelPrefs(prefs) {
+  localStorage.setItem(panelStorageKey(), JSON.stringify(prefs));
+}
+
+function applyPanelLayout() {
+  const prefs = readPanelPrefs();
+  const cards = analyticsPanels();
+  const groups = {};
+  cards.forEach((card, index) => {
+    const key = panelKey(card, index);
+    const group = card.dataset.analyticsGroup || "overview";
+    (groups[group] ||= []).push({ card, key, index });
+    card.classList.toggle("panel-pinned", prefs.pinned[key] === true);
+  });
+  Object.entries(groups).forEach(([group, entries]) => {
+    const savedOrder = Array.isArray(prefs.order[group]) ? prefs.order[group] : [];
+    const orderMap = new Map(savedOrder.map((key, index) => [key, index]));
+    entries.sort((a, b) => (orderMap.get(a.key) ?? 9999) - (orderMap.get(b.key) ?? 9999));
+    entries.forEach((entry, index) => {
+      const pinOffset = prefs.pinned[entry.key] === true ? -1000 : 0;
+      entry.card.style.order = pinOffset + index;
+    });
+  });
 }
 
 function applyPanelPrefs() {
   const prefs = readPanelPrefs();
   analyticsPanels().forEach((card, index) => {
-    const key = card.dataset.panelKey || `panel-${index}`;
-    card.dataset.panelKey = key;
-    card.dataset.customHidden = prefs[key] === false ? "true" : "false";
+    const key = panelKey(card, index);
+    card.dataset.customHidden = prefs.hidden[key] === false ? "true" : "false";
   });
   if (typeof applyAnalyticsView === "function") applyAnalyticsView(currentAnalyticsView);
+}
+
+function savePanelOrder(group, order) {
+  const prefs = readPanelPrefs();
+  prefs.order[group] = order;
+  writePanelPrefs(prefs);
+  applyPanelLayout();
 }
 
 function renderPanelCustomizer() {
@@ -806,23 +855,68 @@ function renderPanelCustomizer() {
   const prefs = readPanelPrefs();
   panelCustomizerList.replaceChildren();
   analyticsPanels().forEach((card, index) => {
-    const key = card.dataset.panelKey || `panel-${index}`;
-    card.dataset.panelKey = key;
+    const key = panelKey(card, index);
+    const group = card.dataset.analyticsGroup || "overview";
     const label = document.createElement("label");
     label.className = "panel-toggle";
+    label.draggable = true;
+    label.dataset.panelKey = key;
+    label.dataset.panelGroup = group;
+    label.title = "Drag to reorder this panel";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
-    checkbox.checked = prefs[key] !== false;
+    checkbox.checked = prefs.hidden[key] !== false;
+    checkbox.addEventListener("click", event => event.stopPropagation());
     checkbox.addEventListener("change", () => {
       const nextPrefs = readPanelPrefs();
-      nextPrefs[key] = checkbox.checked;
-      localStorage.setItem(PANEL_PREFS_KEY, JSON.stringify(nextPrefs));
+      nextPrefs.hidden[key] = checkbox.checked;
+      writePanelPrefs(nextPrefs);
       card.dataset.customHidden = checkbox.checked ? "false" : "true";
       applyAnalyticsView(currentAnalyticsView);
     });
     const text = document.createElement("span");
+    text.className = "panel-toggle-label";
     text.textContent = panelTitle(card, index);
-    label.append(checkbox, text);
+    const pin = document.createElement("button");
+    pin.type = "button";
+    pin.className = "panel-pin";
+    pin.textContent = prefs.pinned[key] === true ? "★" : "☆";
+    pin.title = prefs.pinned[key] === true ? "Unpin panel" : "Pin panel";
+    pin.setAttribute("aria-label", pin.title);
+    pin.classList.toggle("active", prefs.pinned[key] === true);
+    pin.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const nextPrefs = readPanelPrefs();
+      nextPrefs.pinned[key] = nextPrefs.pinned[key] !== true;
+      writePanelPrefs(nextPrefs);
+      renderPanelCustomizer();
+      applyPanelLayout();
+    });
+    label.append(checkbox, text, pin);
+    label.addEventListener("dragstart", event => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", key);
+      label.classList.add("dragging");
+    });
+    label.addEventListener("dragend", () => label.classList.remove("dragging"));
+    label.addEventListener("dragover", event => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    });
+    label.addEventListener("drop", event => {
+      event.preventDefault();
+      const sourceKey = event.dataTransfer.getData("text/plain");
+      const source = panelCustomizerList.querySelector(`[data-panel-key="${CSS.escape(sourceKey)}"]`);
+      if (!source || source === label || source.dataset.panelGroup !== group) return;
+      const labels = [...panelCustomizerList.querySelectorAll(`[data-panel-group="${group}"]`)];
+      const targetIndex = labels.indexOf(label);
+      const sourceIndex = labels.indexOf(source);
+      if (sourceIndex < targetIndex) label.after(source);
+      else label.before(source);
+      const order = [...panelCustomizerList.querySelectorAll(`[data-panel-group="${group}"]`)].map(item => item.dataset.panelKey);
+      savePanelOrder(group, order);
+    });
     panelCustomizerList.appendChild(label);
   });
 }
@@ -844,10 +938,10 @@ customizePanelsButton?.addEventListener("click", () => {
 });
 closePanelCustomizer?.addEventListener("click", closePanelCustomizerMenu);
 resetPanelsButton?.addEventListener("click", () => {
-  localStorage.removeItem(PANEL_PREFS_KEY);
+  localStorage.removeItem(panelStorageKey());
   applyPanelPrefs();
   renderPanelCustomizer();
-  toast("All analytics panels restored");
+  toast("All panels restored for this server");
 });
 applyPanelPrefs();
 
