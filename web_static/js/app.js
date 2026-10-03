@@ -4,6 +4,12 @@ let currentUser = null;
 let currentGuilds = [];
 let currentGuildId = localStorage.getItem("buii-last-guild") || null;
 let allCommands = [];
+const PAGE_SIZE = 5;
+const dashboardState = {
+  recentRows: [], recentPage: 1,
+  leaderboardRows: [], leaderboardPage: 1,
+  musicRows: [], musicPage: 1,
+};
 
 function initials(name) {
   return (name || "?").split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
@@ -17,6 +23,32 @@ function valueOrNull(id) {
 function fmtNum(n) {
   if (n === null || n === undefined) return "—";
   return Number(n).toLocaleString();
+}
+
+function updatedLabel() {
+  return "Updated " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function markUpdated(id) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = updatedLabel();
+}
+
+function renderPager(id, page, totalPages, onChange) {
+  const pager = document.getElementById(id);
+  if (!pager) return;
+  pager.replaceChildren();
+  if (totalPages <= 1) return;
+  for (const label of ["‹", ...Array.from({length: totalPages}, (_, i) => String(i + 1)), "›"]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    const target = label === "‹" ? page - 1 : label === "›" ? page + 1 : Number(label);
+    button.disabled = target < 1 || target > totalPages || target === page;
+    if (target === page) button.classList.add("selected");
+    button.addEventListener("click", () => onChange(target));
+    pager.appendChild(button);
+  }
 }
 
 function escapeHTML(value) {
@@ -254,13 +286,14 @@ async function loadGrowthChart(guildId) {
   } catch (e) { showLoadError(e); }
 }
 
-function rankingRows(items, labelKey, valueKey, formatValue) {
+function rankingRows(items, labelKey, valueKey, formatValue, page = 1) {
   const max = Math.max(1, ...items.map(x => Number(x[valueKey]) || 0));
-  return items.slice(0, 8).map((x, i) => {
+  const start = (page - 1) * PAGE_SIZE;
+  return items.slice(start, start + PAGE_SIZE).map((x, i) => {
     const value = Number(x[valueKey]) || 0;
     const label = escapeHTML(x[labelKey]);
     const formatted = escapeHTML(formatValue ? formatValue(value) : fmtNum(value));
-    return `<div class="ranking-row"><span>${String(i + 1).padStart(2, "0")}</span><strong>${label}</strong><div class="ranking-bar"><i style="width:${Math.round(value / max * 100)}%"></i></div><b>${formatted}</b></div>`;
+    return `<div class="ranking-row"><span>${String(start + i + 1).padStart(2, "0")}</span><strong>${label}</strong><div class="ranking-bar"><i style="width:${Math.round(value / max * 100)}%"></i></div><b>${formatted}</b></div>`;
   }).join("");
 }
 
@@ -272,10 +305,20 @@ async function loadLeaderboard(guildId) {
   if (!guildId) return;
   try {
     const d = await (await apiFetch(`/api/guilds/${guildId}/leaderboard`)).json();
-    const rows = d.leaderboard || [];
-    const html = rows.length ? rankingRows(rows, "inviter", "joins") : '<div class="muted" style="padding:8px 0">No tracked invites yet.</div>';
-    setSafeHTML(document.getElementById("homeLeaderboard"), html);
-    setSafeHTML(document.getElementById("statsLeaderboard"), html);
+    dashboardState.leaderboardRows = d.leaderboard || [];
+    dashboardState.leaderboardPage = 1;
+    const render = () => {
+      const rows = dashboardState.leaderboardRows;
+      const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+      const html = rows.length ? rankingRows(rows, "inviter", "joins", null, dashboardState.leaderboardPage) : '<div class="muted" style="padding:8px 0">No tracked invites yet.</div>';
+      setSafeHTML(document.getElementById("homeLeaderboard"), html);
+      setSafeHTML(document.getElementById("statsLeaderboard"), html);
+      renderPager("homeLeaderboardPager", dashboardState.leaderboardPage, totalPages, page => { dashboardState.leaderboardPage = page; render(); });
+      renderPager("statsLeaderboardPager", dashboardState.leaderboardPage, totalPages, page => { dashboardState.leaderboardPage = page; render(); });
+    };
+    render();
+    markUpdated("homeLeaderboardUpdated");
+    markUpdated("statsLeaderboardUpdated");
   } catch (e) { showLoadError(e); }
 }
 
@@ -293,25 +336,22 @@ async function loadMusicLeaderboard(guildId) {
   } catch (e) { showLoadError(e); }
 }
 
-async function loadRecentJoins(guildId) {
-  if (!guildId) return;
-  try {
-    const d = await (await apiFetch(`/api/guilds/${guildId}/recent-joins`)).json();
-    const rows = d.joins || [];
-    document.getElementById("notificationCount").textContent = rows.length ? `${rows.length} recent` : "No recent joins";
-    document.getElementById("notificationDot").classList.toggle("show", rows.length > 0);
-    const notifications = document.getElementById("notificationList");
-    const activity = document.getElementById("activityList");
-    notifications.replaceChildren();
-    activity.replaceChildren();
-
-    if (!rows.length) {
-      const n = document.createElement("div"); n.className = "muted"; n.style.padding = "12px"; n.textContent = "No joins recorded yet."; notifications.appendChild(n);
-      const a = document.createElement("div"); a.className = "muted"; a.style.padding = "8px 0"; a.textContent = "No joins recorded yet."; activity.appendChild(a);
-      return;
-    }
-
-    for (const join of rows) {
+function renderRecentJoins() {
+  const rows = dashboardState.recentRows;
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const start = (dashboardState.recentPage - 1) * PAGE_SIZE;
+  const visibleRows = rows.slice(start, start + PAGE_SIZE);
+  const notifications = document.getElementById("notificationList");
+  const activity = document.getElementById("activityList");
+  notifications.replaceChildren();
+  activity.replaceChildren();
+  document.getElementById("notificationCount").textContent = rows.length ? `${rows.length} recent` : "No recent joins";
+  document.getElementById("notificationDot").classList.toggle("show", rows.length > 0);
+  if (!visibleRows.length) {
+    const empty = document.createElement("div"); empty.className = "muted"; empty.style.padding = "12px"; empty.textContent = "No joins recorded yet.";
+    notifications.appendChild(empty.cloneNode(true)); activity.appendChild(empty);
+  } else {
+    for (const join of visibleRows) {
       const notification = document.createElement("div"); notification.className = "notification"; notification.dataset.notification = "";
       const icon = document.createElement("div"); icon.className = "notification-icon"; icon.textContent = "✦";
       const content = document.createElement("div"); content.className = "notification-content";
@@ -319,7 +359,6 @@ async function loadRecentJoins(guildId) {
       const invited = document.createElement("p"); invited.textContent = `Invited by ${join.inviter_name || "Unknown"}`;
       const date = document.createElement("span"); date.textContent = join.join_date || "";
       content.append(strong, invited, date); notification.append(icon, content); notifications.appendChild(notification);
-
       const row = document.createElement("div"); row.className = "activity-row";
       const aicon = document.createElement("div"); aicon.className = "activity-icon"; aicon.textContent = "✦";
       const info = document.createElement("div");
@@ -328,6 +367,19 @@ async function loadRecentJoins(guildId) {
       const time = document.createElement("span"); time.className = "time"; time.textContent = join.join_date || "";
       info.append(astrong, small); row.append(aicon, info, time); activity.appendChild(row);
     }
+  }
+  document.getElementById("activityPageLabel").textContent = `Page ${dashboardState.recentPage} of ${totalPages}`;
+  renderPager("activityPager", dashboardState.recentPage, totalPages, page => { dashboardState.recentPage = page; renderRecentJoins(); });
+  markUpdated("recentJoinsUpdated");
+}
+
+async function loadRecentJoins(guildId) {
+  if (!guildId) return;
+  try {
+    const d = await (await apiFetch(`/api/guilds/${guildId}/recent-joins?limit=25`)).json();
+    dashboardState.recentRows = d.joins || [];
+    dashboardState.recentPage = 1;
+    renderRecentJoins();
   } catch (e) { showLoadError(e); }
 }
 
@@ -425,6 +477,14 @@ function showPage(page) {
 document.querySelectorAll("[data-page]").forEach(btn => btn.addEventListener("click", () => { showPage(btn.dataset.page); closeMenus(); }));
 document.getElementById("viewActivityButton").addEventListener("click", () => { showPage("stats"); closeMenus(); });
 document.getElementById("refreshRecentJoinsButton").addEventListener("click", () => loadRecentJoins(currentGuildId));
+document.getElementById("refreshDashboardButton").addEventListener("click", async () => {
+  if (!currentGuildId) return;
+  const button = document.getElementById("refreshDashboardButton");
+  button.disabled = true;
+  await Promise.allSettled([loadOverview(currentGuildId), loadGrowthChart(currentGuildId), loadLeaderboard(currentGuildId), loadMusicLeaderboard(currentGuildId), loadRecentJoins(currentGuildId), loadConfig(currentGuildId)]);
+  button.disabled = false;
+  toast("Dashboard refreshed just now");
+});
 document.getElementById("commandSearch").addEventListener("input", filterCommands);
 document.getElementById("commandCategory").addEventListener("change", filterCommands);
 document.getElementById("growthPeriod").addEventListener("change", () => loadGrowthChart(currentGuildId));
