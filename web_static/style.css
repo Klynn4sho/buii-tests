@@ -2934,3 +2934,33 @@ select.visually-hidden,
 select[hidden] {
     display: none !important;
 }
+
+/* Stabilize custom selects inside configuration cards */
+.config-field {
+    position: relative;
+    align-items: flex-start;
+}
+.config-field .custom-select {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.custom-select-trigger:focus,
+.custom-select-trigger:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.custom-select-menu {
+    max-height: min(240px, 42vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.custom-select-menu::-webkit-scrollbar {
+    width: 6px;
+}
+.custom-select-menu::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 99px;
+}
+.custom-select:has(.custom-select-menu.open) {
+    z-index: 30;
+}
