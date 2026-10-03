@@ -2654,3 +2654,71 @@ p {
 .logout a {
   text-decoration: none !important;
 }
+
+
+/* UX polish: timestamps, pagination, and consistent refresh affordances */
+.card-updated {
+    display: block;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 500;
+}
+.card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 11px;
+    border-top: 1px solid var(--line);
+}
+.pager {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.pager button {
+    min-width: 25px;
+    height: 25px;
+    padding: 0 7px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--surface2);
+    color: var(--muted);
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+}
+.pager button:hover:not(:disabled),
+.pager button.selected {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 20%, var(--surface2));
+    color: var(--text);
+}
+.pager button:disabled {
+    cursor: default;
+    opacity: .45;
+}
+.top-refresh {
+    white-space: nowrap;
+}
+.small-button:disabled,
+.top-refresh:disabled {
+    cursor: wait;
+    opacity: .6;
+}
+@media (max-width: 720px) {
+    .top-refresh {
+        padding-inline: 9px;
+    }
+    .card-footer {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .pager {
+        width: 100%;
+        overflow-x: auto;
+        padding-bottom: 2px;
+    }
+}
