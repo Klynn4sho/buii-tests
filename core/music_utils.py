@@ -378,6 +378,7 @@ async def fetch_deezer_audio_features(
             "loudness": track.get("gain"),
             "genre": (track.get("genre") or {}).get("name"),
             "preview_url": track.get("preview"),
+            "track_url": track.get("link"),
             "cover_url": album.get("cover_big") or album.get("cover"),
         }
     except Exception:
