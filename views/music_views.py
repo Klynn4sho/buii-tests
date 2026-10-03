@@ -15,8 +15,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 from datetime import datetime, timezone, timedelta
+import asyncio
+import base64
+import math
 import re
 import io
+import subprocess
 
 import discord
 from discord import ui
@@ -45,6 +49,127 @@ def _requester_text(requester_name: str = None, ping_text: str = None) -> str:
     if requester_name:
         lines.append(f"Requested by {requester_name}")
     return "\n".join(lines)
+
+
+
+class VoiceMessageUnavailable(RuntimeError):
+    """Raised when the runtime cannot build or send a Discord voice message."""
+
+
+def _voice_waveform(pcm: bytes, points: int = 256) -> str:
+    """Create Discord's base64-encoded 1-byte-per-point waveform preview."""
+    if not pcm:
+        raise VoiceMessageUnavailable("voice conversion returned no PCM audio")
+
+    sample_width = 2
+    sample_count = len(pcm) // sample_width
+    if sample_count == 0:
+        raise VoiceMessageUnavailable("voice conversion returned no samples")
+
+    values = []
+    for offset in range(0, len(pcm) - 1, sample_width):
+        sample = int.from_bytes(pcm[offset:offset + sample_width], "little", signed=True)
+        values.append(sample)
+
+    waveform = bytearray()
+    for index in range(points):
+        start = (index * sample_count) // points
+        end = max(start + 1, ((index + 1) * sample_count) // points)
+        bucket = values[start:end]
+        rms = math.sqrt(sum(sample * sample for sample in bucket) / len(bucket))
+        waveform.append(max(0, min(255, int((rms / 32768.0) * 255 * 1.8))))
+
+    return base64.b64encode(bytes(waveform)).decode("ascii")
+
+
+def _transcode_voice_preview(data: bytes) -> tuple[bytes, float, str]:
+    """Convert arbitrary preview audio into Discord's OGG/Opus voice format."""
+    try:
+        import imageio_ffmpeg
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as exc:
+        raise VoiceMessageUnavailable("FFmpeg is not available") from exc
+
+    def run_ffmpeg(output_args: list[str]) -> bytes:
+        result = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                "pipe:0",
+                "-vn",
+                *output_args,
+                "pipe:1",
+            ],
+            input=data,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=45,
+            check=False,
+        )
+        if result.returncode != 0 or not result.stdout:
+            error = result.stderr.decode("utf-8", errors="replace").strip()[:240]
+            raise VoiceMessageUnavailable(error or "FFmpeg could not decode the preview")
+        return result.stdout
+
+    ogg = run_ffmpeg(["-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "32k", "-f", "ogg"])
+    pcm = run_ffmpeg(["-ac", "1", "-ar", "48000", "-f", "s16le"])
+    duration = len(pcm) / (48000 * 2)
+    return ogg, duration, _voice_waveform(pcm)
+
+
+async def _send_voice_message(
+    session,
+    token: str,
+    channel_id: int,
+    filename: str,
+    audio: bytes,
+    duration: float,
+    waveform: str,
+) -> None:
+    """Use Discord's attachment upload endpoint to create a voice-message bubble."""
+    api = f"https://discord.com/api/v10/channels/{channel_id}"
+    auth = {"Authorization": f"Bot {token}"}
+
+    async with session.post(
+        f"{api}/attachments",
+        headers={**auth, "Content-Type": "application/json"},
+        json={"files": [{"filename": filename, "file_size": len(audio), "id": "0"}]},
+    ) as response:
+        if response.status != 200:
+            raise VoiceMessageUnavailable(f"attachment reservation failed ({response.status})")
+        reservation = await response.json()
+
+    try:
+        upload = reservation["attachments"][0]
+        async with session.put(
+            upload["upload_url"],
+            data=audio,
+            headers={"Content-Type": "audio/ogg; codecs=opus"},
+        ) as response:
+            if response.status not in {200, 201, 204}:
+                raise VoiceMessageUnavailable(f"audio upload failed ({response.status})")
+
+        async with session.post(
+            f"{api}/messages",
+            headers={**auth, "Content-Type": "application/json"},
+            json={
+                "flags": 1 << 13,
+                "attachments": [{
+                    "id": "0",
+                    "filename": filename,
+                    "uploaded_filename": upload["upload_filename"],
+                    "duration_secs": round(duration, 3),
+                    "waveform": waveform,
+                }],
+            },
+        ) as response:
+            if response.status not in {200, 201}:
+                raise VoiceMessageUnavailable(f"voice message creation failed ({response.status})")
+    except KeyError as exc:
+        raise VoiceMessageUnavailable("Discord returned an incomplete upload reservation") from exc
 
 
 class PreviewButton(ui.Button):
@@ -119,10 +244,37 @@ class PreviewButton(ui.Button):
 
             safe_title = re.sub(r"[^A-Za-z0-9._-]+", "-", song.get("title") or "preview")
             safe_title = safe_title.strip("-._")[:60] or "preview"
+            fallback_name = f"{safe_title}-{song['song_number']}.{extension}"
+
+            # Discord's voice-message flag is not exposed by discord.py's
+            # high-level send() helper, so use the REST upload flow when the
+            # runtime has the optional FFmpeg dependency and bot token.
+            token = getattr(getattr(interaction.client, "http", None), "token", None)
+            channel_id = getattr(interaction, "channel_id", None)
+            voice_error = None
+            if token and channel_id:
+                try:
+                    voice_data, duration, waveform = await asyncio.to_thread(
+                        _transcode_voice_preview, data
+                    )
+                    voice_name = f"{safe_title}-{song['song_number']}.ogg"
+                    await _send_voice_message(
+                        session, token, channel_id, voice_name,
+                        voice_data, duration, waveform,
+                    )
+                    await interaction.followup.send(
+                        view=notice("✅ Sent as a voice message."),
+                        ephemeral=True,
+                    )
+                    return
+                except Exception as exc:
+                    voice_error = exc
+                    logger.warning("[music] voice-message send unavailable; using attachment fallback: %s", exc)
+
             await interaction.followup.send(
-                file=discord.File(io.BytesIO(data), filename=f"{safe_title}-{song['song_number']}.{extension}"),
+                file=discord.File(io.BytesIO(data), filename=fallback_name),
             )
-        except Exception as e:
+        except Exception:
             logger.exception("[music] operation failed")
             try:
                 if interaction.response.is_done():
@@ -137,6 +289,7 @@ class PreviewButton(ui.Button):
                     )
             except Exception:
                 logger.debug("Non-fatal exception suppressed", exc_info=True)
+
 
 
 class LyricsButton(ui.Button):
