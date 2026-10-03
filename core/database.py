@@ -1254,6 +1254,29 @@ async def get_music_leaderboard(guild_id: int, limit: int = 10, min_votes: int =
     return await asyncio.to_thread(_raw_get_music_leaderboard, guild_id, limit, min_votes, min_score)
 
 
+def _raw_get_music_log(guild_id, limit=25):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute('''
+            SELECT id, song_number, title, artist, source, url, requested_by_name,
+                   created_at, synced, closed
+            FROM songs
+            WHERE guild_id = %s
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s;
+        ''', (guild_id, limit))
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    finally:
+        release_db_conn(conn)
+
+
+async def get_music_log(guild_id: int, limit: int = 25):
+    return await asyncio.to_thread(_raw_get_music_log, guild_id, limit)
+
+
 def _raw_search_songs(guild_id, query, limit, min_votes, min_score):
     conn = get_db_conn()
     try:
