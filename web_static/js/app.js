@@ -625,10 +625,11 @@ function applyAnalyticsView(view = "overview") {
   const page = document.getElementById("page-stats");
   page?.classList.remove("analytics-view-overview", "analytics-view-growth", "analytics-view-music", "analytics-view-reliability");
   page?.classList.add("analytics-view-" + view);
+  const editing = page?.classList.contains("widget-edit-mode");
   document.querySelectorAll("#page-stats .stats-grid > *").forEach(child => {
     const inView = view === "overview" ? child.dataset.analyticsGroup === "overview" : child.dataset.analyticsGroup === view;
     const customHidden = child.dataset.customHidden === "true";
-    child.hidden = customHidden || !inView;
+    child.hidden = !inView || (customHidden && !editing);
   });
   if (typeof applyPanelLayout === "function") applyPanelLayout();
   const title = document.getElementById("statsPageTitle");
@@ -774,9 +775,9 @@ document.getElementById("themeBtn").addEventListener("click", e => {
 const panelCustomizer = document.getElementById("panelCustomizer");
 const panelCustomizerList = document.getElementById("panelCustomizerList");
 const customizePanelsButton = document.getElementById("customizePanelsButton");
-const closePanelCustomizer = document.getElementById("closePanelCustomizer");
-const resetPanelsButton = document.getElementById("resetPanelsButton");
+const resetWidgetLayoutButton = document.getElementById("resetWidgetLayoutButton");
 const PANEL_PREFS_KEY = "buii-analytics-panels";
+let widgetEditMode = false;
 
 function panelStorageKey() {
   return `${PANEL_PREFS_KEY}:${currentGuildId || "default"}`;
@@ -805,9 +806,10 @@ function readPanelPrefs() {
       hidden: value.hidden && typeof value.hidden === "object" ? value.hidden : {},
       pinned: value.pinned && typeof value.pinned === "object" ? value.pinned : {},
       order: value.order && typeof value.order === "object" ? value.order : {},
+      sizes: value.sizes && typeof value.sizes === "object" ? value.sizes : {},
     };
   } catch (_) {
-    return { hidden: {}, pinned: {}, order: {} };
+    return { hidden: {}, pinned: {}, order: {}, sizes: {} };
   }
 }
 
@@ -819,17 +821,20 @@ function applyPanelLayout() {
   const prefs = readPanelPrefs();
   const cards = analyticsPanels();
   const groups = {};
+  const groupBases = { overview: 0, growth: 100, music: 200, reliability: 300 };
   cards.forEach((card, index) => {
     const key = panelKey(card, index);
     const group = card.dataset.analyticsGroup || "overview";
     (groups[group] ||= []).push({ card, key, index });
     card.classList.toggle("panel-pinned", prefs.pinned[key] === true);
+    card.classList.remove("widget-size-1", "widget-size-2", "widget-size-4");
+    if ([1, 2, 4].includes(Number(prefs.sizes[key]))) card.classList.add(`widget-size-${prefs.sizes[key]}`);
   });
   Object.entries(groups).forEach(([group, entries]) => {
     const savedOrder = Array.isArray(prefs.order[group]) ? prefs.order[group] : [];
     const orderMap = new Map(savedOrder.map((key, index) => [key, index]));
     entries.sort((a, b) => (orderMap.get(a.key) ?? 9999) - (orderMap.get(b.key) ?? 9999));
-    const groupBase = { overview: 0, growth: 100, music: 200, reliability: 300 }[group] ?? 0;
+    const groupBase = groupBases[group] ?? 0;
     entries.forEach((entry, index) => {
       const pinnedOffset = prefs.pinned[entry.key] === true ? 0 : 100;
       entry.card.style.order = groupBase + 1 + pinnedOffset + index;
@@ -844,107 +849,131 @@ function applyPanelPrefs() {
     card.dataset.customHidden = prefs.hidden[key] === false ? "true" : "false";
   });
   if (typeof applyAnalyticsView === "function") applyAnalyticsView(currentAnalyticsView);
+  applyPanelLayout();
 }
 
-function savePanelOrder(group, order) {
+function savePanelOrder(group) {
   const prefs = readPanelPrefs();
-  prefs.order[group] = order;
+  prefs.order[group] = analyticsPanels()
+    .filter(card => (card.dataset.analyticsGroup || "overview") === group)
+    .map((card, index) => panelKey(card, index));
   writePanelPrefs(prefs);
   applyPanelLayout();
 }
 
-function renderPanelCustomizer() {
-  if (!panelCustomizerList) return;
-  const prefs = readPanelPrefs();
-  panelCustomizerList.replaceChildren();
+function makeWidgetButton(text, title, className = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `widget-control-button ${className}`.trim();
+  button.textContent = text;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  return button;
+}
+
+function renderWidgetControls() {
   analyticsPanels().forEach((card, index) => {
+    card.querySelector(".widget-controls")?.remove();
+    card.draggable = widgetEditMode;
+    if (!widgetEditMode) return;
     const key = panelKey(card, index);
-    const group = card.dataset.analyticsGroup || "overview";
-    const label = document.createElement("label");
-    label.className = "panel-toggle";
-    label.draggable = true;
-    label.dataset.panelKey = key;
-    label.dataset.panelGroup = group;
-    label.title = "Drag to reorder this panel";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = prefs.hidden[key] !== false;
-    checkbox.addEventListener("click", event => event.stopPropagation());
-    checkbox.addEventListener("change", () => {
-      const nextPrefs = readPanelPrefs();
-      nextPrefs.hidden[key] = checkbox.checked;
-      writePanelPrefs(nextPrefs);
-      card.dataset.customHidden = checkbox.checked ? "false" : "true";
-      applyAnalyticsView(currentAnalyticsView);
+    const prefs = readPanelPrefs();
+    const controls = document.createElement("div");
+    controls.className = "widget-controls";
+    controls.addEventListener("mousedown", event => event.stopPropagation());
+
+    const grip = document.createElement("span");
+    grip.className = "widget-grip";
+    grip.textContent = "⋮⋮";
+    grip.title = "Drag this widget to reorder";
+    controls.appendChild(grip);
+
+    const sizes = document.createElement("span");
+    sizes.className = "widget-size-controls";
+    [1, 2, 4].forEach(size => {
+      const button = makeWidgetButton(`${size}×1`, `Set ${size} column widget size`, Number(prefs.sizes[key]) === size ? "active" : "");
+      button.addEventListener("click", event => {
+        event.stopPropagation();
+        const nextPrefs = readPanelPrefs();
+        nextPrefs.sizes[key] = size;
+        writePanelPrefs(nextPrefs);
+        applyPanelLayout();
+        renderWidgetControls();
+      });
+      sizes.appendChild(button);
     });
-    const text = document.createElement("span");
-    text.className = "panel-toggle-label";
-    text.textContent = panelTitle(card, index);
-    const pin = document.createElement("button");
-    pin.type = "button";
-    pin.className = "panel-pin";
-    pin.textContent = prefs.pinned[key] === true ? "★" : "☆";
-    pin.title = prefs.pinned[key] === true ? "Unpin panel" : "Pin panel";
-    pin.setAttribute("aria-label", pin.title);
-    pin.classList.toggle("active", prefs.pinned[key] === true);
+    controls.appendChild(sizes);
+
+    const pin = makeWidgetButton(prefs.pinned[key] === true ? "★" : "☆", prefs.pinned[key] === true ? "Unpin widget" : "Pin widget", prefs.pinned[key] === true ? "active" : "");
     pin.addEventListener("click", event => {
-      event.preventDefault();
       event.stopPropagation();
       const nextPrefs = readPanelPrefs();
       nextPrefs.pinned[key] = nextPrefs.pinned[key] !== true;
       writePanelPrefs(nextPrefs);
-      renderPanelCustomizer();
       applyPanelLayout();
+      renderWidgetControls();
     });
-    label.append(checkbox, text, pin);
-    label.addEventListener("dragstart", event => {
+    controls.appendChild(pin);
+
+    const visibility = makeWidgetButton(card.dataset.customHidden === "true" ? "Show" : "Hide", card.dataset.customHidden === "true" ? "Show widget" : "Hide widget");
+    visibility.addEventListener("click", event => {
+      event.stopPropagation();
+      const nextPrefs = readPanelPrefs();
+      const show = card.dataset.customHidden === "true";
+      nextPrefs.hidden[key] = show;
+      writePanelPrefs(nextPrefs);
+      card.dataset.customHidden = show ? "false" : "true";
+      applyAnalyticsView(currentAnalyticsView);
+      renderWidgetControls();
+    });
+    controls.appendChild(visibility);
+    card.appendChild(controls);
+    card.classList.toggle("widget-hidden-preview", card.dataset.customHidden === "true");
+
+    card.addEventListener("dragstart", event => {
+      if (!widgetEditMode) return;
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", key);
-      label.classList.add("dragging");
+      card.classList.add("widget-dragging");
     });
-    label.addEventListener("dragend", () => label.classList.remove("dragging"));
-    label.addEventListener("dragover", event => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
+    card.addEventListener("dragend", () => card.classList.remove("widget-dragging"));
+    card.addEventListener("dragover", event => {
+      if (widgetEditMode) event.preventDefault();
     });
-    label.addEventListener("drop", event => {
+    card.addEventListener("drop", event => {
+      if (!widgetEditMode) return;
       event.preventDefault();
       const sourceKey = event.dataTransfer.getData("text/plain");
-      const source = panelCustomizerList.querySelector(`[data-panel-key="${CSS.escape(sourceKey)}"]`);
-      if (!source || source === label || source.dataset.panelGroup !== group) return;
-      const labels = [...panelCustomizerList.querySelectorAll(`[data-panel-group="${group}"]`)];
-      const targetIndex = labels.indexOf(label);
-      const sourceIndex = labels.indexOf(source);
-      if (sourceIndex < targetIndex) label.after(source);
-      else label.before(source);
-      const order = [...panelCustomizerList.querySelectorAll(`[data-panel-group="${group}"]`)].map(item => item.dataset.panelKey);
-      savePanelOrder(group, order);
+      const source = analyticsPanels().find(item => item.dataset.panelKey === sourceKey);
+      const group = card.dataset.analyticsGroup || "overview";
+      if (!source || source === card || source.dataset.analyticsGroup !== group) return;
+      card.before(source);
+      savePanelOrder(group);
+      renderWidgetControls();
     });
-    panelCustomizerList.appendChild(label);
   });
 }
 
-function openPanelCustomizer() {
-  renderPanelCustomizer();
-  panelCustomizer.hidden = false;
-  customizePanelsButton?.setAttribute("aria-expanded", "true");
-}
-
-function closePanelCustomizerMenu() {
+function setWidgetEditMode(enabled) {
+  widgetEditMode = enabled;
+  const page = document.getElementById("page-stats");
+  page?.classList.toggle("widget-edit-mode", enabled);
   if (panelCustomizer) panelCustomizer.hidden = true;
-  customizePanelsButton?.setAttribute("aria-expanded", "false");
+  if (resetWidgetLayoutButton) resetWidgetLayoutButton.hidden = !enabled;
+  if (customizePanelsButton) {
+    customizePanelsButton.textContent = enabled ? "Done editing" : "Edit panels";
+    customizePanelsButton.setAttribute("aria-expanded", enabled ? "true" : "false");
+  }
+  applyAnalyticsView(currentAnalyticsView);
+  renderWidgetControls();
 }
 
-customizePanelsButton?.addEventListener("click", () => {
-  if (panelCustomizer?.hidden) openPanelCustomizer();
-  else closePanelCustomizerMenu();
-});
-closePanelCustomizer?.addEventListener("click", closePanelCustomizerMenu);
-resetPanelsButton?.addEventListener("click", () => {
+customizePanelsButton?.addEventListener("click", () => setWidgetEditMode(!widgetEditMode));
+resetWidgetLayoutButton?.addEventListener("click", () => {
   localStorage.removeItem(panelStorageKey());
   applyPanelPrefs();
-  renderPanelCustomizer();
-  toast("All panels restored for this server");
+  renderWidgetControls();
+  toast("Widget layout reset for this server");
 });
 applyPanelPrefs();
 
