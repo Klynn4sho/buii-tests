@@ -16,6 +16,7 @@ import functools
 import logging
 import re
 import secrets
+from urllib.parse import quote
 
 import requests
 from flask import Blueprint, current_app, jsonify, redirect, request, session
@@ -69,7 +70,7 @@ def login():
 def callback():
     error = request.args.get("error")
     if error:
-        return redirect("/?login_error=" + error)
+        return redirect("/?login_error=" + quote(error, safe=""))
 
     state = request.args.get("state")
     if not state or state != session.pop("oauth_state", None):
@@ -88,23 +89,28 @@ def callback():
     except oauth.OAuthNotConfigured as e:
         return jsonify({"error": str(e)}), 503
 
-    # Only keep what the dashboard actually needs — never store the raw
-    # access/refresh token pair in the session cookie itself, only server-
-    # visible identity and the pre-filtered guild list.
-    manageable = [
-        {"id": g["id"], "name": g["name"],
-         "icon_url": (f"https://cdn.discordapp.com/icons/{g['id']}/{g['icon']}.png" if g.get("icon") else None)}
-        for g in user_guilds
+    # Do not store the OAuth guild list in Flask's signed cookie. Large
+    # guild lists can exceed browser cookie limits, making a successful
+    # callback look like a login that never sticks. The guild list is rebuilt
+    # from the bot's live cache in /api/me instead.
+    oauth_manageable = [
+        g for g in user_guilds
         if (int(g.get("permissions", 0)) & DASHBOARD_REQUIRED_PERMS)
     ]
+    if not oauth_manageable:
+        return redirect("/?login_error=" + quote(
+            "No manageable servers were returned by Discord", safe=""
+        ))
 
+    # Rotate the session after successful authentication and discard the
+    # one-time OAuth state.
+    session.clear()
     session["user"] = {
         "id": user["id"],
         "username": user.get("username"),
         "avatar_url": (f"https://cdn.discordapp.com/avatars/{user['id']}/{user['avatar']}.png"
                        if user.get("avatar") else None),
     }
-    session["manageable_guilds"] = manageable
     session.permanent = True
 
     return redirect("/")
@@ -162,13 +168,16 @@ def guild_access_required(fn):
 @bp.route("/api/me")
 @login_required
 def me():
-    guild_ids = [int(g["id"]) for g in session.get("manageable_guilds", [])]
     try:
-        present_ids = set(bridge.run_on_bot(current_app.bot, bridge.get_manageable_guild_ids, guild_ids))
+        guilds = bridge.run_on_bot(
+            current_app.bot,
+            bridge.get_user_manageable_guilds,
+            int(session["user"]["id"]),
+        )
     except bridge.BotNotReady:
-        present_ids = set()  # bot still starting — show the user, guild list just comes back empty this once
-
-    guilds = [g for g in session.get("manageable_guilds", []) if int(g["id"]) in present_ids]
+        guilds = []
+    except TimeoutError as e:
+        return jsonify({"error": str(e)}), 503
     return jsonify({"user": session["user"], "guilds": guilds})
 
 
