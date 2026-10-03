@@ -114,7 +114,7 @@ class BuiiBot(commands.Bot):
 
     def validate_security_config(self):
         """Fail closed on secrets that must exist in a production deployment."""
-        if APP_ENV != "production":
+        if APP_ENV != "production" and os.environ.get("FLASK_ENV") != "production":
             return
         missing = []
         if not BOT_TOKEN:
