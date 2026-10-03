@@ -29,7 +29,7 @@ from core import database
 from core.config import RATING_WINDOW_HOURS
 from core.components import SimpleLayout, footer_line, notice
 from core.helpers import create_music_card, format_elapsed
-from core.music_utils import fetch_canonical_preview, fetch_deezer_audio_features, fetch_lyrics, remove_from_spotify
+from core.music_utils import fetch_canonical_preview, fetch_lyrics, remove_from_spotify
 
 
 def _track_text(title: str, artist: str, preview_url: str = None, url: str = None,
@@ -301,69 +301,6 @@ class PreviewButton(ui.Button):
 
 
 
-class AudioStatsButton(ui.Button):
-    def __init__(self, guild_id: int, song_id: int):
-        super().__init__(
-            label="♫ Audio Stats",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"audio-stats|{song_id}",
-        )
-        self.guild_id = guild_id
-        self.song_id = song_id
-
-    async def callback(self, interaction: discord.Interaction):
-        try:
-            song = await database.get_song(self.guild_id, self.song_id)
-            session = getattr(interaction.client, "http_session", None)
-            features = await fetch_deezer_audio_features(
-                session,
-                song.get("url") if song else None,
-                song.get("title") if song else None,
-                song.get("artist") if song else None,
-            )
-            if not features:
-                await interaction.response.send_message(
-                    view=notice(
-                        "ℹ️ No Deezer match or audio stats are available "
-                        "for this track."
-                    ),
-                    ephemeral=True,
-                )
-                return
-
-            tempo = features.get("tempo")
-            gain = features.get("loudness")
-            bpm_text = f"{float(tempo):.0f}" if tempo is not None else "—"
-            gain_text = f"{float(gain):.1f} dB" if gain is not None else "—"
-            genre = features.get("genre") or "Unknown"
-
-            stats = (
-                f"## AUDIO STATS\n"
-                f"-# {features.get('title') or song.get('title') or 'Unknown Title'} · "
-                f"{features.get('artist') or song.get('artist') or 'Unknown Artist'}\n\n"
-                f"**BPM**  ·  {bpm_text}\n"
-                f"**Gain**  ·  {gain_text}\n"
-                f"**Genre**  ·  {genre}\n\n"
-                f"-# Deezer track metadata"
-            )
-            await interaction.response.send_message(
-                view=SimpleLayout(stats),
-                ephemeral=True,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
-        except Exception:
-            logger.exception("[music] audio stats lookup failed")
-            if interaction.response.is_done():
-                await interaction.followup.send(
-                    view=notice("❌ Couldn't fetch audio stats right now."),
-                    ephemeral=True,
-                )
-            else:
-                await interaction.response.send_message(
-                    view=notice("❌ Couldn't fetch audio stats right now."),
-                    ephemeral=True,
-                )
-
 
 class LyricsButton(ui.Button):
     def __init__(self, guild_id: int, song_id: int):
@@ -501,7 +438,6 @@ class RatingView(ui.LayoutView):
         link_buttons = [
             PreviewButton(guild_id, song_id, disabled=preview_used),
             LyricsButton(guild_id, song_id),
-            AudioStatsButton(guild_id, song_id),
         ]
         if url:
             link_buttons.append(ui.Button(label="↗ Source", style=discord.ButtonStyle.link, url=url))
