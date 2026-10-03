@@ -25,6 +25,7 @@ import os
 import logging
 from difflib import get_close_matches
 import signal
+import secrets
 from datetime import datetime, timezone
 from threading import Thread
 
@@ -175,6 +176,10 @@ async def _command_prefix_for(message: discord.Message) -> str:
     return value
 
 
+def _error_reference() -> str:
+    return f"ERR-{secrets.token_hex(4).upper()}"
+
+
 def _command_hint_view(title: str, body: str, run_label: str | None = None,
                        callback=None) -> ui.LayoutView:
     view = ui.LayoutView(timeout=90)
@@ -258,8 +263,15 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
     elif isinstance(error, commands.CommandOnCooldown):
         text = f"⏱️ That command is on cooldown. Try again in {error.retry_after:.1f}s."
     else:
-        logger.exception("Unhandled command error in %r (%s / %s)", ctx.command, ctx.guild, ctx.author)
-        text = "❌ Something went wrong running that command. The error was logged."
+        reference = _error_reference()
+        logger.exception(
+            "Unhandled command error ref=%s in %r (%s / %s)",
+            reference, ctx.command, ctx.guild, ctx.author,
+        )
+        text = (
+            "❌ Something went wrong running that command. "
+            f"Reference `" + reference + "`. Please try again."
+        )
 
     try:
         await ctx.send(view=notice(text))
@@ -278,8 +290,12 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     elif isinstance(error, app_commands.CommandOnCooldown):
         message = f"⏱️ That command is on cooldown. Try again in {error.retry_after:.1f}s."
     else:
-        logger.exception("Unhandled app command error in %r", interaction.command)
-        message = "❌ Something went wrong running that command. The error was logged."
+        reference = _error_reference()
+        logger.exception("Unhandled app command error ref=%s in %r", reference, interaction.command)
+        message = (
+            "❌ Something went wrong running that command. "
+            f"Reference `" + reference + "`. Please try again."
+        )
 
     try:
         if interaction.response.is_done():
