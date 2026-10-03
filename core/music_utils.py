@@ -214,21 +214,65 @@ def _spotify_track_id(track_url: str):
     return track_url.split("spotify.com/track/", 1)[1].split("?", 1)[0].split("/", 1)[0] or None
 
 
-async def fetch_audio_features(session: aiohttp.ClientSession, track_url: str):
-    """Fetch Spotify musical stats for a Spotify track URL when available."""
-    track_id = _spotify_track_id(track_url)
-    if not session or not track_id:
+async def fetch_audio_features(
+    session: aiohttp.ClientSession,
+    track_url: str = None,
+    title: str = None,
+    artist: str = None,
+):
+    """Fetch Spotify musical stats, resolving non-Spotify songs by metadata."""
+    if not session:
         return None
 
     token = await _get_spotify_token(session)
     if not token:
         return None
 
+    headers = {"Authorization": f"Bearer {token}"}
+    track_id = _spotify_track_id(track_url)
+
     try:
-        endpoint = f"https://api.spotify.com/v1/audio-features/{track_id}"
+        if not track_id and title:
+            query = f"track:{title}"
+            if artist:
+                query += f" artist:{artist}"
+            async with session.get(
+                "https://api.spotify.com/v1/search",
+                params={"q": query, "type": "track", "limit": 5},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                items = ((await resp.json(content_type=None)).get("tracks") or {}).get("items") or []
+                if not items:
+                    return None
+
+                # Prefer an exact title/artist match over Spotify's ranking.
+                title_fold = str(title).casefold().strip()
+                artist_fold = str(artist or "").casefold().strip()
+                ranked = sorted(
+                    items,
+                    key=lambda item: (
+                        str(item.get("name") or "").casefold().strip() != title_fold,
+                        not any(
+                            str(a.get("name") or "").casefold().strip() == artist_fold
+                            for a in item.get("artists") or []
+                        ) if artist_fold else False,
+                    ),
+                )
+                track_id = _spotify_track_id(
+                    ((ranked[0].get("external_urls") or {}).get("spotify"))
+                )
+                if not track_id:
+                    return None
+
+        if not track_id:
+            return None
+
         async with session.get(
-            endpoint,
-            headers={"Authorization": f"Bearer {token}"},
+            f"https://api.spotify.com/v1/audio-features/{track_id}",
+            headers=headers,
             timeout=aiohttp.ClientTimeout(total=8),
         ) as resp:
             if resp.status != 200:
