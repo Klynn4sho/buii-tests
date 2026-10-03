@@ -20,6 +20,7 @@ from core.config import (
     SPOTIFY_REFRESH_TOKEN, SPOTIFY_PLAYLIST_ID, DB_POOL_MIN, DB_POOL_MAX,
 )
 from views.help_views import HelpView
+from core.music_utils import get_music_cache_stats
 
 
 class AdminCog(commands.Cog, name="AdminCog"):
@@ -62,9 +63,10 @@ class AdminCog(commands.Cog, name="AdminCog"):
     )
     async def diagnostics(self, ctx: commands.Context):
         """Private health panel for the configured BYPASS_USER_ID only."""
-        if not BYPASS_USER_ID or ctx.author.id != BYPASS_USER_ID:
+        is_server_admin = bool(ctx.guild and ctx.author.guild_permissions.administrator)
+        if (not BYPASS_USER_ID or ctx.author.id != BYPASS_USER_ID) and not is_server_admin:
             await ctx.send(
-                view=notice("❌ This diagnostic command is restricted."),
+                view=notice("❌ This diagnostic command is restricted to the bot owner or server administrators."),
                 ephemeral=bool(ctx.interaction),
             )
             return
@@ -78,6 +80,8 @@ class AdminCog(commands.Cog, name="AdminCog"):
             SPOTIFY_PLAYLIST_ID,
         ))
         latency_ms = round(self.bot.latency * 1000) if self.bot.latency != float("inf") else "offline"
+        cache = get_music_cache_stats()
+        providers = "Deezer · iTunes · Spotify"
 
         text = (
             "## BOT DIAGNOSTICS\n"
@@ -86,7 +90,9 @@ class AdminCog(commands.Cog, name="AdminCog"):
             f"**Guilds**  ·  `{len(self.bot.guilds)}`\n"
             f"**Database pool**  ·  {'✅ ready' if db_ready else '❌ unavailable'}\n"
             f"**HTTP session**  ·  {'✅ ready' if session and not session.closed else '❌ unavailable'}\n"
-            f"**Spotify configuration**  ·  {'✅ complete' if spotify_ready else '⚠️ incomplete'}\n\n"
+            f"**Spotify configuration**  ·  {'✅ complete' if spotify_ready else '⚠️ incomplete'}\n"
+            f"**Music providers**  ·  `{providers}`\n"
+            f"**Music cache**  ·  `{cache['entries']}` entries · `{cache['hits']}` hits · `{cache['misses']}` misses · `{cache['ttl_seconds']}s TTL`\n\n"
             + "Use this panel to verify deployment health without exposing secrets."
         )
         await ctx.send(view=SimpleLayout(text), ephemeral=bool(ctx.interaction))
