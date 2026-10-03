@@ -3214,3 +3214,110 @@ select[hidden] {
         width: 100%;
     }
 }
+
+
+/* Sidebar analytics groups and editable panel drawer */
+.analytics-nav {
+    margin-bottom: 4px;
+}
+.analytics-nav .nav-item {
+    padding-left: 28px;
+    font-size: 10px;
+}
+.analytics-nav .nav-item .dot {
+    width: 5px;
+    height: 5px;
+    background: var(--muted);
+}
+.analytics-nav .nav-item:hover,
+.analytics-nav .nav-item.active {
+    background: var(--accent-soft);
+    color: var(--text);
+}
+.analytics-nav .nav-item.active .dot {
+    background: var(--accent);
+}
+.page-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-shrink: 0;
+}
+.panel-customizer {
+    position: relative;
+    z-index: 10;
+    display: grid;
+    gap: 15px;
+    margin-top: 16px;
+    padding: 17px;
+    border: 1px solid var(--line);
+    border-radius: 15px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+.panel-customizer[hidden] {
+    display: none;
+}
+.panel-customizer-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 15px;
+}
+.panel-customizer-header div {
+    display: grid;
+    gap: 4px;
+}
+.panel-customizer-header strong {
+    font-size: 13px;
+}
+.panel-customizer-header span {
+    color: var(--muted);
+    font-size: 9px;
+}
+.panel-customizer-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+}
+.panel-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    color: var(--text);
+    font-size: 9px;
+    cursor: pointer;
+}
+.panel-toggle:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+.panel-toggle input {
+    accent-color: var(--accent);
+}
+.stats-grid > .card[hidden] {
+    display: none;
+}
+.analytics-section-heading {
+    scroll-margin-top: 90px;
+}
+@media (max-width: 720px) {
+    .page-header-actions {
+        width: 100%;
+        align-items: stretch;
+        flex-direction: column;
+    }
+    .page-header-actions .small-button {
+        width: 100%;
+    }
+    .panel-customizer-list {
+        grid-template-columns: 1fr;
+    }
+    .analytics-nav .nav-item {
+        padding-left: 22px;
+    }
+}
