@@ -930,17 +930,17 @@ function renderWidgetControls() {
     card.appendChild(controls);
     card.classList.toggle("widget-hidden-preview", card.dataset.customHidden === "true");
 
-    card.addEventListener("dragstart", event => {
+    card.ondragstart = event => {
       if (!widgetEditMode) return;
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", key);
       card.classList.add("widget-dragging");
     });
-    card.addEventListener("dragend", () => card.classList.remove("widget-dragging"));
-    card.addEventListener("dragover", event => {
+    card.ondragend = () => card.classList.remove("widget-dragging");
+    card.ondragover = event => {
       if (widgetEditMode) event.preventDefault();
     });
-    card.addEventListener("drop", event => {
+    card.ondrop = event => {
       if (!widgetEditMode) return;
       event.preventDefault();
       const sourceKey = event.dataTransfer.getData("text/plain");
