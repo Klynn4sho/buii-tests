@@ -1277,6 +1277,40 @@ async def get_music_log(guild_id: int, limit: int = 25):
     return await asyncio.to_thread(_raw_get_music_log, guild_id, limit)
 
 
+def _raw_get_music_insights(guild_id, limit=5):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute('''
+            SELECT COALESCE(requested_by_name, 'Unknown') AS requester,
+                   COUNT(*) AS songs,
+                   MAX(created_at) AS last_requested
+            FROM songs
+            WHERE guild_id = %s
+            GROUP BY COALESCE(requested_by_name, 'Unknown')
+            ORDER BY songs DESC, last_requested DESC
+            LIMIT %s;
+        ''', (guild_id, limit))
+        requesters = cursor.fetchall()
+        cursor.execute('''
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE synced = 1) AS synced,
+                   COUNT(*) FILTER (WHERE closed = 1 AND synced = 0) AS pending,
+                   MAX(created_at) AS last_added
+            FROM songs
+            WHERE guild_id = %s;
+        ''', (guild_id,))
+        sync = cursor.fetchone()
+        cursor.close()
+        return {"requesters": requesters, "sync": sync}
+    finally:
+        release_db_conn(conn)
+
+
+async def get_music_insights(guild_id: int, limit: int = 5):
+    return await asyncio.to_thread(_raw_get_music_insights, guild_id, limit)
+
+
 def _raw_search_songs(guild_id, query, limit, min_votes, min_score):
     conn = get_db_conn()
     try:
