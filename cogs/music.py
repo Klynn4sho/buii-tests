@@ -464,9 +464,38 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
     @commands.command(name="song")
     async def song_command(self, ctx: commands.Context, *, query: str):
-        title, artist, cover_url, track_url, preview_url = await search_song_metadata(self.bot.http_session, query)
-        await self.post_song(ctx.channel, "Manual Request", track_url, title or query, artist, ctx.author,
-                              ctx.guild.id if ctx.guild else 0, ctx.channel.id, cover_url, preview_url)
+        try:
+            title, artist, cover_url, track_url, preview_url = await search_song_metadata(
+                self.bot.http_session, query
+            )
+            if not title and not track_url:
+                await ctx.send(
+                    view=notice(
+                        f"❌ I couldn't find **{query}**. Try \`Artist - Title\` or send a direct music link."
+                    )
+                )
+                return
+
+            await self.post_song(
+                ctx.channel,
+                "Manual Request",
+                track_url,
+                title or query,
+                artist,
+                ctx.author,
+                ctx.guild.id if ctx.guild else 0,
+                ctx.channel.id,
+                cover_url,
+                preview_url,
+            )
+        except Exception:
+            logger.exception("[music] manual song command failed for query=%r", query)
+            await ctx.send(
+                view=notice(
+                    "❌ I couldn't post that song. Try a more complete title and artist, "
+                    "or send the original link instead."
+                )
+            )
 
     @app_commands.command(name="song", description="Nominate a song by name for rating (no link needed)")
     @app_commands.describe(query="Song name, e.g. 'Artist - Title'")
