@@ -2977,3 +2977,43 @@ select[hidden] {
 .config-field .custom-select-menu.open {
     display: grid;
 }
+
+
+.requester-card {
+    grid-column: span 2;
+}
+.requester-list {
+    display: grid;
+    gap: 2px;
+}
+.requester-row {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 9px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--line);
+}
+.requester-row:last-child {
+    border-bottom: 0;
+}
+.requester-rank {
+    color: var(--accent);
+    font-size: 10px;
+    font-weight: 800;
+}
+.requester-row strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+}
+.requester-count {
+    color: var(--muted);
+    font-size: 10px;
+}
+@media (max-width: 980px) {
+    .requester-card {
+        grid-column: span 4;
+    }
+}
