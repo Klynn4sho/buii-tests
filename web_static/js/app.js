@@ -935,11 +935,11 @@ function renderWidgetControls() {
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", key);
       card.classList.add("widget-dragging");
-    });
+    };
     card.ondragend = () => card.classList.remove("widget-dragging");
     card.ondragover = event => {
       if (widgetEditMode) event.preventDefault();
-    });
+    };
     card.ondrop = event => {
       if (!widgetEditMode) return;
       event.preventDefault();
@@ -950,7 +950,7 @@ function renderWidgetControls() {
       card.before(source);
       savePanelOrder(group);
       renderWidgetControls();
-    });
+    };
   });
 }
 
