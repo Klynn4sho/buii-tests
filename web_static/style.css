@@ -3380,3 +3380,102 @@ select[hidden] {
 .panel-toggle.dragging {
     opacity: .45;
 }
+
+
+/* Direct Android-style widget editing */
+.stats-grid {
+    grid-auto-flow: dense;
+}
+.stats-grid > .card.widget-size-1 {
+    grid-column: span 1;
+}
+.stats-grid > .card.widget-size-2 {
+    grid-column: span 2;
+}
+.stats-grid > .card.widget-size-4 {
+    grid-column: span 4;
+}
+.widget-edit-mode .stats-grid > .card {
+    position: relative;
+    padding-top: 56px;
+}
+.widget-controls {
+    position: absolute;
+    z-index: 3;
+    top: 10px;
+    left: 12px;
+    right: 12px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 30px;
+    padding: 4px 5px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    box-shadow: 0 8px 20px rgba(0,0,0,.16);
+    backdrop-filter: blur(10px);
+}
+.widget-grip {
+    padding: 0 4px;
+    color: var(--muted);
+    font-size: 12px;
+    letter-spacing: -3px;
+    cursor: grab;
+}
+.widget-size-controls {
+    display: flex;
+    gap: 3px;
+    margin-left: auto;
+}
+.widget-control-button {
+    min-width: 27px;
+    height: 23px;
+    padding: 0 6px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface2);
+    color: var(--muted);
+    font: inherit;
+    font-size: 8px;
+    font-weight: 800;
+    cursor: pointer;
+}
+.widget-control-button:hover,
+.widget-control-button.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text);
+}
+.widget-hidden-preview {
+    opacity: .48;
+    outline: 1px dashed var(--accent);
+    outline-offset: -5px;
+}
+.widget-dragging {
+    opacity: .35;
+}
+@media (max-width: 1050px) and (min-width: 701px) {
+    .stats-grid > .card.widget-size-4 {
+        grid-column: span 2;
+    }
+}
+@media (max-width: 700px) {
+    .stats-grid > .card.widget-size-1,
+    .stats-grid > .card.widget-size-2,
+    .stats-grid > .card.widget-size-4 {
+        grid-column: span 1;
+    }
+    .widget-controls {
+        left: 9px;
+        right: 9px;
+        gap: 3px;
+    }
+    .widget-size-controls {
+        margin-left: auto;
+    }
+    .widget-control-button {
+        min-width: 24px;
+        padding: 0 4px;
+    }
+}
