@@ -13,8 +13,9 @@ import os
 from datetime import timedelta
 
 from flask import Flask, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 
-from core.config import APP_ENV, FLASK_SECRET_KEY
+from core.config import APP_ENV, DISCORD_REDIRECT_URI, FLASK_SECRET_KEY
 from web.api import bp as api_bp
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,9 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web_stati
 
 def create_app(bot) -> Flask:
     app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
+    # Render terminates TLS at its proxy; trust the forwarded scheme so
+    # Flask generates correct secure-cookie behavior behind HTTPS.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.bot = bot
 
     if not FLASK_SECRET_KEY:
@@ -44,7 +48,7 @@ def create_app(bot) -> Flask:
         SESSION_COOKIE_PATH="/",
         # Only force Secure in production; localhost dev over plain http
         # would otherwise silently never send the cookie back.
-        SESSION_COOKIE_SECURE=(APP_ENV == "production" or os.environ.get("FLASK_ENV") == "production"),
+        # Use the OAuth redirect scheme instead of FLASK_ENV: this keeps local\n        # HTTP testing usable even when a deployment sets FLASK_ENV=production.\n        SESSION_COOKIE_SECURE=bool(DISCORD_REDIRECT_URI and DISCORD_REDIRECT_URI.startswith("https://")),
         PERMANENT_SESSION_LIFETIME=timedelta(days=7),
     )
 
