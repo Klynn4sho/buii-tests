@@ -208,6 +208,37 @@ async def fetch_lyrics(session: aiohttp.ClientSession, title: str, artist: str):
         return None
 
 
+def _spotify_track_id(track_url: str):
+    if not track_url or "spotify.com/track/" not in track_url:
+        return None
+    return track_url.split("spotify.com/track/", 1)[1].split("?", 1)[0].split("/", 1)[0] or None
+
+
+async def fetch_audio_features(session: aiohttp.ClientSession, track_url: str):
+    """Fetch Spotify musical stats for a Spotify track URL when available."""
+    track_id = _spotify_track_id(track_url)
+    if not session or not track_id:
+        return None
+
+    token = await _get_spotify_token(session)
+    if not token:
+        return None
+
+    try:
+        endpoint = f"https://api.spotify.com/v1/audio-features/{track_id}"
+        async with session.get(
+            endpoint,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=aiohttp.ClientTimeout(total=8),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            return await resp.json(content_type=None)
+    except Exception:
+        logger.debug("Audio feature lookup failed", exc_info=True)
+        return None
+
+
 _spotify_token_cache = {"token": None, "expires_at": 0.0}
 
 _spotify_user_token_cache = {"token": SPOTIFY_USER_TOKEN, "expires_at": 0.0}
