@@ -378,6 +378,70 @@ class MatchButton(ui.Button):
                 )
 
 
+class TrackInfoButton(ui.Button):
+    def __init__(self, guild_id: int, song_id: int):
+        super().__init__(
+            label="▣ Track Info",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"track-info|{song_id}",
+        )
+        self.guild_id = guild_id
+        self.song_id = song_id
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            song = await database.get_song(self.guild_id, self.song_id)
+            if not song:
+                await interaction.response.send_message(
+                    view=notice("❌ This song is no longer available."),
+                    ephemeral=True,
+                )
+                return
+
+            session = getattr(interaction.client, "http_session", None)
+            match = await fetch_deezer_audio_features(
+                session,
+                song.get("url"),
+                song.get("title"),
+                song.get("artist"),
+            )
+            if not match:
+                await interaction.response.send_message(
+                    view=notice("ℹ️ No track information match was found."),
+                    ephemeral=True,
+                )
+                return
+
+            text = (
+                "## ▣ TRACK INFO\n"
+                f"**Artist**  ·  {match.get('artist') or song.get('artist') or 'Unknown'}\n"
+                f"**Album**  ·  {match.get('album') or 'Unknown'}\n"
+                f"**Release date**  ·  {match.get('release_date') or 'Unknown'}\n"
+                f"**Genre**  ·  {match.get('genre') or 'Unknown'}\n"
+                f"**Provider**  ·  {match.get('provider') or 'Deezer'}"
+            )
+            if match.get("track_url"):
+                text += f"\n\n[Open matched track]({match['track_url']})"
+
+            await interaction.response.send_message(
+                view=SimpleLayout(text),
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception:
+            logger.exception("[music] track info lookup failed")
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    view=notice("❌ Couldn't fetch track info right now."),
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    view=notice("❌ Couldn't fetch track info right now."),
+                    ephemeral=True,
+                )
+
+
 class LyricsButton(ui.Button):
     def __init__(self, guild_id: int, song_id: int):
         super().__init__(
@@ -515,6 +579,7 @@ class RatingView(ui.LayoutView):
             PreviewButton(guild_id, song_id, disabled=preview_used),
             LyricsButton(guild_id, song_id),
             MatchButton(guild_id, song_id),
+            TrackInfoButton(guild_id, song_id),
         ]
         if url:
             link_buttons.append(ui.Button(label="↗ Source", style=discord.ButtonStyle.link, url=url))
