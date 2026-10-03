@@ -24,7 +24,7 @@ from discord.ext import commands, tasks
 from core import database
 from core.checks import has_mod_permission
 from core.config import (
-    RATING_WINDOW_HOURS, COLOR_SUCCESS,
+    RATING_WINDOW_HOURS,
     SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN,
     SPOTIFY_PLAYLIST_ID,
 )
@@ -342,7 +342,11 @@ class MusicCog(commands.Cog, name="MusicCog"):
             "-# Access and refresh tokens are never displayed.",
             footer_line("Spotify Integration"),
         ])
-        await ctx.send(view=SimpleLayout("\n".join(lines), ephemeral=bool(ctx.interaction)))
+        spotify_view = SimpleLayout("\n".join(lines))
+        if ctx.interaction:
+            await ctx.send(view=spotify_view, ephemeral=True)
+        else:
+            await ctx.send(view=spotify_view)
 
     @commands.hybrid_command(name="synctoplaylist", description="Sync a locked, qualifying song to the Spotify playlist.")
     @has_mod_permission()
@@ -385,7 +389,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
                 f"**{song['title']}**{artist_str} was manually added to the server Spotify playlist.\n"
                 + footer_line("Manual Spotify Sync")
             )
-            await ctx.send(view=SimpleLayout(text, accent=COLOR_SUCCESS), ephemeral=True)
+            await ctx.send(view=SimpleLayout(text), ephemeral=True)
         else:
             await ctx.send(
                 view=notice("❌ Spotify sync failed. Check that `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`, and `SPOTIFY_PLAYLIST_ID` are set and the token has the `playlist-modify` scope."),
