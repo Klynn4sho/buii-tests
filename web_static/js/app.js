@@ -244,6 +244,8 @@ async function loadOverview(guildId) {
     document.getElementById("anaTotalJoins").textContent = fmtNum(d.total_joins);
     document.getElementById("anaJoins24h").textContent = fmtNum(d.joins_24h);
     document.getElementById("anaRisk").textContent = fmtNum(d.extreme_risk_count);
+    document.getElementById("anaRiskRate").textContent = d.total_joins ? ((Number(d.extreme_risk_count || 0) / Number(d.total_joins)) * 100).toFixed(1) + "%" : "—";
+    document.getElementById("anaFreshness").textContent = "Just now";
     document.getElementById("healthStatus").textContent = "Connected";
     document.getElementById("healthTrend").textContent = "Operational";
     document.getElementById("healthLatency").textContent = d.bot_latency_ms !== null ? d.bot_latency_ms + "ms" : "—";
@@ -283,6 +285,12 @@ async function loadGrowthChart(guildId) {
         labels.appendChild(span);
       }
     }
+    const dailyAverage = series.length ? total / series.length : 0;
+    const peak = series.reduce((best, point) => Number(point.joins) > Number(best.joins) ? point : best, { joins: 0, date: null });
+    document.getElementById("anaDailyAvg").textContent = dailyAverage.toFixed(1);
+    document.getElementById("anaPeakDay").textContent = peak.date ? new Date(peak.date).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—";
+    document.getElementById("anaPeakJoins").textContent = peak.date ? `${peak.joins} joins on peak day` : "No growth data";
+
   } catch (e) { showLoadError(e); }
 }
 
@@ -461,6 +469,34 @@ function filterCommands() {
     card.style.display = matches ? "flex" : "none";
   });
 }
+
+const categorySelect = document.getElementById("commandCategory");
+const categoryButton = document.getElementById("commandCategoryButton");
+const categoryMenu = document.querySelector("#commandCategorySelect .custom-select-menu");
+document.querySelectorAll("#commandCategorySelect [data-category]").forEach(option => {
+  option.addEventListener("click", () => {
+    categorySelect.value = option.dataset.category;
+    categoryButton.firstChild.textContent = option.textContent + " ";
+    document.querySelectorAll("#commandCategorySelect [data-category]").forEach(item => item.setAttribute("aria-selected", item === option ? "true" : "false"));
+    categoryMenu.classList.remove("open");
+    categoryButton.setAttribute("aria-expanded", "false");
+    filterCommands();
+  });
+});
+categoryButton.addEventListener("click", event => {
+  event.stopPropagation();
+  const open = categoryMenu.classList.toggle("open");
+  categoryButton.setAttribute("aria-expanded", open ? "true" : "false");
+});
+document.addEventListener("click", event => {
+  if (!event.target.closest("#commandCategorySelect")) {
+    categoryMenu.classList.remove("open");
+    categoryButton.setAttribute("aria-expanded", "false");
+  }
+});
+categoryButton.addEventListener("keydown", event => {
+  if (event.key === "Escape") { categoryMenu.classList.remove("open"); categoryButton.setAttribute("aria-expanded", "false"); }
+});
 
 const pages = ["home", "commands", "config", "stats"];
 function showPage(page) {
