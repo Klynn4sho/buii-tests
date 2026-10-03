@@ -35,6 +35,21 @@ class ProjectHardeningTests(unittest.TestCase):
         self.assertIn('SESSION_COOKIE_NAME="buii_session"', app)
         self.assertIn('SESSION_COOKIE_PATH="/"', app)
 
+    def test_music_card_controls_and_statuses_are_wired(self):
+        views = (ROOT / "views" / "music_views.py").read_text()
+        helpers = (ROOT / "core" / "helpers.py").read_text()
+        music = (ROOT / "cogs" / "music.py").read_text()
+        utils = (ROOT / "core" / "music_utils.py").read_text()
+        self.assertIn("class LyricsButton", views)
+        self.assertIn("fetch_lyrics", views)
+        self.assertIn("ephemeral=True", views)
+        self.assertIn("_requester_text", views)
+        self.assertIn('status: str = "open"', helpers)
+        self.assertIn("ADDED TO PLAYLIST", helpers)
+        self.assertNotIn("rectangle([0, 0, 8 * SCALE", helpers)
+        self.assertIn("refresh_song_message", music)
+        self.assertIn("async def fetch_lyrics", utils)
+
     def test_live_permission_and_config_validation_are_wired(self):
         api = (ROOT / "web" / "api.py").read_text()
         bridge = (ROOT / "web" / "bridge.py").read_text()
