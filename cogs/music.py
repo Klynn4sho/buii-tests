@@ -24,7 +24,7 @@ from discord.ext import commands, tasks
 from core import database
 from core.checks import has_mod_permission
 from core.config import (
-    RATING_WINDOW_HOURS, COLOR_SUCCESS,
+    RATING_WINDOW_HOURS, COLOR_ACCENT, COLOR_SUCCESS,
     SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN,
     SPOTIFY_PLAYLIST_ID,
 )
