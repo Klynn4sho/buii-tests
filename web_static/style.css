@@ -3161,3 +3161,56 @@ select[hidden] {
         font-size: 16px;
     }
 }
+
+
+/* Additional planned insight panels */
+.rating-bars {
+    display: grid;
+    gap: 9px;
+    margin-top: 14px;
+}
+.rating-bars > div {
+    display: grid;
+    grid-template-columns: 35px minmax(0, 1fr) 20px;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 9px;
+}
+.rating-bars i {
+    display: block;
+    height: 7px;
+    overflow: hidden;
+    border-radius: 99px;
+    background: var(--surface2);
+}
+.rating-bars b {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+}
+.rating-bars strong {
+    color: var(--muted);
+    font-size: 9px;
+    text-align: right;
+}
+.export-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 16px;
+}
+.export-actions .small-button:disabled {
+    cursor: not-allowed;
+    opacity: .5;
+}
+@media (max-width: 720px) {
+    .export-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+    }
+    .export-actions .small-button {
+        width: 100%;
+    }
+}
