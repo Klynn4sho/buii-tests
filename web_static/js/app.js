@@ -521,6 +521,9 @@ document.querySelectorAll("#commandCategorySelect [data-category]").forEach(opti
 });
 categoryButton.addEventListener("click", event => {
   event.stopPropagation();
+  document.querySelectorAll(".custom-select-menu.open").forEach(other => {
+    if (other !== categoryMenu) { other.classList.remove("open"); const trigger = other.parentElement.querySelector(".custom-select-trigger"); if (trigger) trigger.setAttribute("aria-expanded", "false"); }
+  });
   const open = categoryMenu.classList.toggle("open");
   categoryButton.setAttribute("aria-expanded", open ? "true" : "false");
 });
@@ -553,7 +556,14 @@ function enhanceSelect(select) {
       menu.appendChild(item);
     });
   };
-  button.addEventListener("click", event => { event.stopPropagation(); const open = menu.classList.toggle("open"); button.setAttribute("aria-expanded", open ? "true" : "false"); });
+  button.addEventListener("click", event => {
+    event.stopPropagation();
+    document.querySelectorAll(".custom-select-menu.open").forEach(other => {
+      if (other !== menu) { other.classList.remove("open"); const trigger = other.parentElement.querySelector(".custom-select-trigger"); if (trigger) trigger.setAttribute("aria-expanded", "false"); }
+    });
+    const open = menu.classList.toggle("open");
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+  });
   button.addEventListener("keydown", event => { if (event.key === "Escape") { menu.classList.remove("open"); button.setAttribute("aria-expanded", "false"); } });
   select.addEventListener("change", sync);
   enhancedSelects.set(select.id, sync); sync();
