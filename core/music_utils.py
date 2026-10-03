@@ -377,6 +377,8 @@ async def fetch_deezer_audio_features(
             "tempo": track.get("bpm"),
             "loudness": track.get("gain"),
             "genre": (track.get("genre") or {}).get("name"),
+            "album": album.get("title"),
+            "release_date": album.get("release_date"),
             "preview_url": track.get("preview"),
             "track_url": track.get("link"),
             "cover_url": album.get("cover_big") or album.get("cover"),
