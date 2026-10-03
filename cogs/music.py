@@ -24,7 +24,7 @@ from discord.ext import commands, tasks
 from core import database
 from core.checks import has_mod_permission
 from core.config import (
-    RATING_WINDOW_HOURS, COLOR_ACCENT, COLOR_SUCCESS,
+    RATING_WINDOW_HOURS, COLOR_SUCCESS,
     SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN,
     SPOTIFY_PLAYLIST_ID,
 )
@@ -342,7 +342,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             "-# Access and refresh tokens are never displayed.",
             footer_line("Spotify Integration"),
         ])
-        await ctx.send(view=SimpleLayout("\n".join(lines), accent=COLOR_SUCCESS if ready else COLOR_ACCENT), ephemeral=bool(ctx.interaction))
+        await ctx.send(view=SimpleLayout("\n".join(lines), ephemeral=bool(ctx.interaction)))
 
     @commands.hybrid_command(name="synctoplaylist", description="Sync a locked, qualifying song to the Spotify playlist.")
     @has_mod_permission()
