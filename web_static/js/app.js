@@ -223,6 +223,7 @@ function selectServer(id) {
     loadLeaderboard(id),
     loadMusicLeaderboard(id),
     loadMusicLog(id),
+    loadMusicInsights(id),
     loadConfig(id),
     loadRecentJoins(id),
   ]);
@@ -426,6 +427,29 @@ async function loadMusicLog(guildId) {
   } catch (e) { showLoadError(e); }
 }
 
+async function loadMusicInsights(guildId) {
+  if (!guildId) return;
+  try {
+    const d = await (await apiFetch(`/api/guilds/${guildId}/music-insights`)).json();
+    const list = document.getElementById("requesterList");
+    list.replaceChildren();
+    const requesters = d.requesters || [];
+    if (!requesters.length) { const empty = document.createElement("div"); empty.className = "muted"; empty.textContent = "No song requests yet."; list.appendChild(empty); }
+    requesters.forEach((requester, index) => {
+      const row = document.createElement("div"); row.className = "requester-row";
+      const rank = document.createElement("span"); rank.className = "requester-rank"; rank.textContent = String(index + 1).padStart(2, "0");
+      const name = document.createElement("strong"); name.textContent = requester.name || "Unknown";
+      const count = document.createElement("span"); count.className = "requester-count"; count.textContent = `${requester.songs} ${requester.songs === 1 ? "song" : "songs"}`;
+      row.append(rank, name, count); list.appendChild(row);
+    });
+    markUpdated("requestersUpdated");
+    const sync = d.sync || {};
+    const syncText = !sync.playlist_configured ? "Not configured" : `${sync.synced}/${sync.total} synced`;
+    document.getElementById("healthSync").textContent = syncText;
+    document.getElementById("healthSyncQueue").textContent = sync.playlist_configured ? `${sync.pending} pending` : "Playlist unavailable";
+  } catch (e) { showLoadError(e); }
+}
+
 async function loadConfig(guildId) {
   if (!guildId) return;
   try {
@@ -594,7 +618,7 @@ document.getElementById("refreshDashboardButton").addEventListener("click", asyn
   if (!currentGuildId) return;
   const button = document.getElementById("refreshDashboardButton");
   button.disabled = true;
-  await Promise.allSettled([loadOverview(currentGuildId), loadGrowthChart(currentGuildId), loadLeaderboard(currentGuildId), loadMusicLeaderboard(currentGuildId), loadMusicLog(currentGuildId), loadRecentJoins(currentGuildId), loadConfig(currentGuildId)]);
+  await Promise.allSettled([loadOverview(currentGuildId), loadGrowthChart(currentGuildId), loadLeaderboard(currentGuildId), loadMusicLeaderboard(currentGuildId), loadMusicLog(currentGuildId), loadMusicInsights(currentGuildId), loadRecentJoins(currentGuildId), loadConfig(currentGuildId)]);
   button.disabled = false;
   toast("Dashboard refreshed just now");
 });
