@@ -214,13 +214,28 @@ def _spotify_track_id(track_url: str):
     return track_url.split("spotify.com/track/", 1)[1].split("?", 1)[0].split("/", 1)[0] or None
 
 
-async def fetch_audio_features(
+_TRACK_VARIANT_TAG_RE = re.compile(
+    r"\s*(?:[\(\[\{][^\)\]\}]*?(?:sped\s*up|slowed|nightcore|"
+    r"reverb|remix|edit|version|cover|live)[^\)\]\}]*?[\)\]\}]|"
+    r"\b(?:sped\s*up|slowed(?:\s*\+\s*reverb)?|nightcore)\b)",
+    re.IGNORECASE,
+)
+
+
+def _clean_track_term(value: str) -> str:
+    if not value:
+        return ""
+    cleaned = _TRACK_VARIANT_TAG_RE.sub(" ", str(value))
+    return re.sub(r"\s+", " ", cleaned).strip(" -")
+
+
+async def search_spotify_track(
     session: aiohttp.ClientSession,
-    track_url: str = None,
-    title: str = None,
+    title: str,
     artist: str = None,
+    track_url: str = None,
 ):
-    """Fetch Spotify musical stats, resolving non-Spotify songs by metadata."""
+    """Find the canonical Spotify track, ignoring speed/remix source tags."""
     if not session:
         return None
 
@@ -228,51 +243,82 @@ async def fetch_audio_features(
     if not token:
         return None
 
-    headers = {"Authorization": f"Bearer {token}"}
     track_id = _spotify_track_id(track_url)
+    headers = {"Authorization": f"Bearer {token}"}
 
     try:
-        if not track_id and title:
-            query = f"track:{title}"
-            if artist:
-                query += f" artist:{artist}"
+        if track_id:
             async with session.get(
-                "https://api.spotify.com/v1/search",
-                params={"q": query, "type": "track", "limit": 5},
+                f"https://api.spotify.com/v1/tracks/{track_id}",
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=8),
             ) as resp:
-                if resp.status != 200:
-                    return None
-                items = ((await resp.json(content_type=None)).get("tracks") or {}).get("items") or []
-                if not items:
-                    return None
+                if resp.status == 200:
+                    return await resp.json(content_type=None)
 
-                # Prefer an exact title/artist match over Spotify's ranking.
-                title_fold = str(title).casefold().strip()
-                artist_fold = str(artist or "").casefold().strip()
-                ranked = sorted(
-                    items,
-                    key=lambda item: (
-                        str(item.get("name") or "").casefold().strip() != title_fold,
-                        not any(
-                            str(a.get("name") or "").casefold().strip() == artist_fold
-                            for a in item.get("artists") or []
-                        ) if artist_fold else False,
-                    ),
-                )
-                track_id = _spotify_track_id(
-                    ((ranked[0].get("external_urls") or {}).get("spotify"))
-                )
-                if not track_id:
-                    return None
-
-        if not track_id:
+        clean_title = _clean_track_term(title)
+        clean_artist = _clean_track_term(artist)
+        if not clean_title:
             return None
+        query = f"track:{clean_title}"
+        if clean_artist:
+            query += f" artist:{clean_artist}"
 
         async with session.get(
-            f"https://api.spotify.com/v1/audio-features/{track_id}",
+            "https://api.spotify.com/v1/search",
+            params={"q": query, "type": "track", "limit": 10},
             headers=headers,
+            timeout=aiohttp.ClientTimeout(total=8),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            items = ((await resp.json(content_type=None)).get("tracks") or {}).get("items") or []
+            if not items:
+                return None
+
+        title_fold = clean_title.casefold()
+        artist_fold = clean_artist.casefold()
+        def rank(item):
+            item_title = _clean_track_term(item.get("name")).casefold()
+            item_artists = [
+                _clean_track_term(a.get("name")).casefold()
+                for a in item.get("artists") or []
+            ]
+            return (
+                item_title != title_fold,
+                not (artist_fold and artist_fold in item_artists),
+                not bool(item.get("preview_url")),
+            )
+
+        return sorted(items, key=rank)[0]
+    except Exception:
+        logger.debug("Spotify track lookup failed", exc_info=True)
+        return None
+
+
+async def fetch_audio_features(
+    session: aiohttp.ClientSession,
+    track_url: str = None,
+    title: str = None,
+    artist: str = None,
+):
+    """Fetch Spotify musical stats, resolving non-Spotify songs by metadata."""
+    track = await search_spotify_track(session, title, artist, track_url)
+    if not track:
+        return None
+
+    track_id = track.get("id")
+    if not track_id:
+        return None
+
+    token = await _get_spotify_token(session)
+    if not token:
+        return None
+
+    try:
+        async with session.get(
+            f"https://api.spotify.com/v1/audio-features/{track_id}",
+            headers={"Authorization": f"Bearer {token}"},
             timeout=aiohttp.ClientTimeout(total=8),
         ) as resp:
             if resp.status != 200:
@@ -283,57 +329,48 @@ async def fetch_audio_features(
         return None
 
 
-_spotify_token_cache = {"token": None, "expires_at": 0.0}
+async def fetch_canonical_preview(
+    session: aiohttp.ClientSession,
+    source_url: str,
+    title: str,
+    artist: str = None,
+):
+    """Return a canonical preview URL when the source is a variant upload."""
+    if not session or not title or _spotify_track_id(source_url):
+        return None
 
-_spotify_user_token_cache = {"token": SPOTIFY_USER_TOKEN, "expires_at": 0.0}
+    track = await search_spotify_track(session, title, artist)
+    if track and track.get("preview_url"):
+        return track["preview_url"]
 
-
-async def _refresh_spotify_user_token(session: aiohttp.ClientSession):
-    if not (SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET and SPOTIFY_REFRESH_TOKEN):
+    # Spotify often omits preview_url. Use Deezer as a compatible preview
+    # fallback, but only after the canonical Spotify match was attempted.
+    clean_title = _clean_track_term(title)
+    clean_artist = _clean_track_term(artist)
+    query = f"{clean_artist} {clean_title}".strip()
+    if not query:
         return None
     try:
-        auth_header = aiohttp.helpers.encode_basic_auth(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET)
-        async with session.post(
-            "https://accounts.spotify.com/api/token",
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": SPOTIFY_REFRESH_TOKEN,
-            },
-            headers={"Authorization": auth_header},
+        async with session.get(
+            "https://api.deezer.com/search",
+            params={"q": query, "limit": 5},
             timeout=aiohttp.ClientTimeout(total=8),
         ) as resp:
             if resp.status != 200:
                 return None
-            data = await resp.json(content_type=None)
-            token = data.get("access_token")
-            if not token:
+            items = (await resp.json(content_type=None)).get("data") or []
+            if not items:
                 return None
-            now = asyncio.get_event_loop().time()
-            _spotify_user_token_cache["token"] = token
-            _spotify_user_token_cache["expires_at"] = now + data.get("expires_in", 3600) - 60
-            return token
+            title_fold = clean_title.casefold()
+            artist_fold = clean_artist.casefold()
+            for item in items:
+                item_title = _clean_track_term(item.get("title")).casefold()
+                item_artist = _clean_track_term((item.get("artist") or {}).get("name")).casefold()
+                if item_title == title_fold and (not artist_fold or item_artist == artist_fold):
+                    return item.get("preview")
     except Exception:
-        return None
-
-
-async def _get_spotify_user_token(session: aiohttp.ClientSession, force_refresh: bool = False):
-    now = asyncio.get_event_loop().time()
-    cached = _spotify_user_token_cache["token"]
-    expires_at = _spotify_user_token_cache["expires_at"]
-
-    if not force_refresh and cached and (not expires_at or now < expires_at):
-        return cached
-
-    refreshed = await _refresh_spotify_user_token(session)
-    if refreshed:
-        return refreshed
-
-    if not force_refresh and SPOTIFY_USER_TOKEN:
-        _spotify_user_token_cache["token"] = SPOTIFY_USER_TOKEN
-        _spotify_user_token_cache["expires_at"] = 0.0
-        return SPOTIFY_USER_TOKEN
+        logger.debug("Canonical preview lookup failed", exc_info=True)
     return None
-
 
 
 
