@@ -22,9 +22,9 @@ import discord
 from discord import ui
 
 from core import database
-from core.config import RATING_WINDOW_HOURS, COLOR_DANGER
+from core.config import RATING_WINDOW_HOURS
 from core.components import SimpleLayout, footer_line, notice
-from core.helpers import create_music_card, score_color, format_elapsed
+from core.helpers import create_music_card, format_elapsed
 from core.music_utils import fetch_lyrics, remove_from_spotify
 
 
@@ -229,7 +229,7 @@ class RatingButton(ui.Button):
         sync_alert = ""
 
         card_bytes, dominant_rgb = await create_music_card(bot.http_session, song["title"], song["artist"], song["cover_url"],
-                                                             avg, count, genre=song["genre"], song_number=song["song_number"])
+                                                             avg, count, genre=song["genre"], song_number=song["song_number"],\n                                                             status=("playlist" if song.get("synced") else "closed" if song.get("closed") else "open"))
         new_file = discord.File(fp=card_bytes, filename="rating_card.png")
 
         # ping_text is deliberately not carried over here — it's the initial
