@@ -9,6 +9,7 @@ const dashboardState = {
   recentRows: [], recentPage: 1,
   leaderboardRows: [], leaderboardPage: 1,
   musicRows: [], musicPage: 1,
+  musicLogRows: [], musicLogPage: 1,
 };
 
 function initials(name) {
@@ -221,6 +222,7 @@ function selectServer(id) {
     loadGrowthChart(id),
     loadLeaderboard(id),
     loadMusicLeaderboard(id),
+    loadMusicLog(id),
     loadConfig(id),
     loadRecentJoins(id),
   ]);
@@ -391,6 +393,39 @@ async function loadRecentJoins(guildId) {
   } catch (e) { showLoadError(e); }
 }
 
+function renderMusicLog() {
+  const rows = dashboardState.musicLogRows;
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const start = (dashboardState.musicLogPage - 1) * PAGE_SIZE;
+  const visible = rows.slice(start, start + PAGE_SIZE);
+  const list = document.getElementById("musicLogList");
+  list.replaceChildren();
+  if (!visible.length) { const empty = document.createElement("div"); empty.className = "muted"; empty.textContent = "No songs have been logged yet."; list.appendChild(empty); }
+  for (const song of visible) {
+    const item = document.createElement("div"); item.className = "song-log-row";
+    const number = document.createElement("span"); number.className = "song-log-number"; number.textContent = `#${song.song_number || "—"}`;
+    const body = document.createElement("div"); body.className = "song-log-body";
+    const title = document.createElement("strong"); title.textContent = song.title || "Untitled track";
+    const meta = document.createElement("small"); meta.textContent = `${song.artist || "Unknown artist"} · requested by ${song.requested_by || "Unknown"}`;
+    body.append(title, meta);
+    const right = document.createElement("div"); right.className = "song-log-right";
+    const status = document.createElement("span"); status.className = "song-status " + (song.status === "open" ? "open" : song.status === "closed" ? "closed" : "synced"); status.textContent = song.status;
+    const time = document.createElement("small"); time.textContent = song.created_at ? new Date(song.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—";
+    right.append(status, time); item.append(number, body, right); list.appendChild(item);
+  }
+  document.getElementById("musicLogPageLabel").textContent = `Page ${dashboardState.musicLogPage} of ${totalPages}`;
+  renderPager("musicLogPager", dashboardState.musicLogPage, totalPages, page => { dashboardState.musicLogPage = page; renderMusicLog(); });
+  markUpdated("musicLogUpdated");
+}
+
+async function loadMusicLog(guildId) {
+  if (!guildId) return;
+  try {
+    const d = await (await apiFetch(`/api/guilds/${guildId}/music-log?limit=50`)).json();
+    dashboardState.musicLogRows = d.songs || []; dashboardState.musicLogPage = 1; renderMusicLog();
+  } catch (e) { showLoadError(e); }
+}
+
 async function loadConfig(guildId) {
   if (!guildId) return;
   try {
@@ -408,6 +443,7 @@ async function loadConfig(guildId) {
         if (current && current.id === option.id) opt.selected = true;
         sel.appendChild(opt);
       }
+      enhancedSelects.get(id)?.();
     };
 
     fillSelect("cfgLogChannel", d.channels || [], d.log_channel);
@@ -497,6 +533,36 @@ document.addEventListener("click", event => {
 categoryButton.addEventListener("keydown", event => {
   if (event.key === "Escape") { categoryMenu.classList.remove("open"); categoryButton.setAttribute("aria-expanded", "false"); }
 });
+const enhancedSelects = new Map();
+function enhanceSelect(select) {
+  if (!select || enhancedSelects.has(select.id)) return;
+  select.classList.add("visually-hidden");
+  const wrapper = document.createElement("div"); wrapper.className = "custom-select"; wrapper.id = select.id + "Custom";
+  const button = document.createElement("button"); button.type = "button"; button.className = "custom-select-trigger"; button.setAttribute("aria-haspopup", "listbox"); button.setAttribute("aria-expanded", "false");
+  const menu = document.createElement("div"); menu.className = "custom-select-menu"; menu.setAttribute("role", "listbox"); menu.setAttribute("aria-label", select.id);
+  wrapper.append(button, menu); select.parentNode.insertBefore(wrapper, select.nextSibling);
+  const sync = () => {
+    const selected = select.options[select.selectedIndex] || select.options[0];
+    button.textContent = selected ? selected.textContent : "Select an option";
+    const caret = document.createElement("span"); caret.textContent = "⌄"; button.appendChild(caret);
+    menu.replaceChildren();
+    [...select.options].forEach(option => {
+      const item = document.createElement("button"); item.type = "button"; item.textContent = option.textContent; item.dataset.value = option.value; item.setAttribute("role", "option"); item.setAttribute("aria-selected", option.selected ? "true" : "false");
+      item.addEventListener("click", () => { select.value = option.value; select.dispatchEvent(new Event("change", { bubbles: true })); menu.classList.remove("open"); button.setAttribute("aria-expanded", "false"); });
+      menu.appendChild(item);
+    });
+  };
+  button.addEventListener("click", event => { event.stopPropagation(); const open = menu.classList.toggle("open"); button.setAttribute("aria-expanded", open ? "true" : "false"); });
+  button.addEventListener("keydown", event => { if (event.key === "Escape") { menu.classList.remove("open"); button.setAttribute("aria-expanded", "false"); } });
+  select.addEventListener("change", sync);
+  enhancedSelects.set(select.id, sync); sync();
+}
+document.querySelectorAll("select:not(#commandCategory)").forEach(enhanceSelect);
+document.addEventListener("click", event => {
+  document.querySelectorAll(".custom-select-menu.open").forEach(menu => {
+    if (!event.target.closest(".custom-select")) { menu.classList.remove("open"); const trigger = menu.parentElement.querySelector(".custom-select-trigger"); if (trigger) trigger.setAttribute("aria-expanded", "false"); }
+  });
+});
 
 const pages = ["home", "commands", "config", "stats"];
 function showPage(page) {
@@ -517,7 +583,7 @@ document.getElementById("refreshDashboardButton").addEventListener("click", asyn
   if (!currentGuildId) return;
   const button = document.getElementById("refreshDashboardButton");
   button.disabled = true;
-  await Promise.allSettled([loadOverview(currentGuildId), loadGrowthChart(currentGuildId), loadLeaderboard(currentGuildId), loadMusicLeaderboard(currentGuildId), loadRecentJoins(currentGuildId), loadConfig(currentGuildId)]);
+  await Promise.allSettled([loadOverview(currentGuildId), loadGrowthChart(currentGuildId), loadLeaderboard(currentGuildId), loadMusicLeaderboard(currentGuildId), loadMusicLog(currentGuildId), loadRecentJoins(currentGuildId), loadConfig(currentGuildId)]);
   button.disabled = false;
   toast("Dashboard refreshed just now");
 });
