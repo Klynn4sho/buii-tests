@@ -3321,3 +3321,16 @@ select[hidden] {
         padding-left: 22px;
     }
 }
+
+
+/* Analytics are separate pages now; their category banner is redundant. */
+.page#page-stats.analytics-view-growth .analytics-section-heading,
+.page#page-stats.analytics-view-music .analytics-section-heading,
+.page#page-stats.analytics-view-reliability .analytics-section-heading {
+    display: none;
+}
+.analytics-nav {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+}
