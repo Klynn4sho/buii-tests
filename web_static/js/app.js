@@ -609,11 +609,13 @@ function prepareAnalyticsGroups() {
   const grid = document.querySelector("#page-stats .stats-grid");
   if (!grid) return;
   let group = "overview";
+  const groupBase = { overview: 0, growth: 100, music: 200, reliability: 300 };
   [...grid.children].forEach(child => {
     if (child.classList.contains("analytics-section-heading")) {
       group = child.id.replace("analytics-", "") || "overview";
     }
     child.dataset.analyticsGroup = group;
+    child.style.order = groupBase[group] ?? 0;
   });
 }
 
@@ -827,9 +829,10 @@ function applyPanelLayout() {
     const savedOrder = Array.isArray(prefs.order[group]) ? prefs.order[group] : [];
     const orderMap = new Map(savedOrder.map((key, index) => [key, index]));
     entries.sort((a, b) => (orderMap.get(a.key) ?? 9999) - (orderMap.get(b.key) ?? 9999));
+    const groupBase = { overview: 0, growth: 100, music: 200, reliability: 300 }[group] ?? 0;
     entries.forEach((entry, index) => {
-      const pinOffset = prefs.pinned[entry.key] === true ? -1000 : 0;
-      entry.card.style.order = pinOffset + index;
+      const pinnedOffset = prefs.pinned[entry.key] === true ? 0 : 100;
+      entry.card.style.order = groupBase + 1 + pinnedOffset + index;
     });
   });
 }
