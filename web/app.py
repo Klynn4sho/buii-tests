@@ -36,8 +36,12 @@ def create_app(bot) -> Flask:
         app.secret_key = FLASK_SECRET_KEY
 
     app.config.update(
+        # Use a dedicated cookie name/path so stale cookies from older
+        # dashboard builds cannot shadow the current OAuth session.
+        SESSION_COOKIE_NAME="buii_session",
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_PATH="/",
         # Only force Secure in production; localhost dev over plain http
         # would otherwise silently never send the cookie back.
         SESSION_COOKIE_SECURE=(APP_ENV == "production" or os.environ.get("FLASK_ENV") == "production"),
