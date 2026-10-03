@@ -2964,3 +2964,16 @@ select[hidden] {
 .custom-select:has(.custom-select-menu.open) {
     z-index: 30;
 }
+
+/* Configuration menus expand in-flow so they never cover another field. */
+.config-field .custom-select {
+    display: block;
+}
+.config-field .custom-select-menu {
+    position: static;
+    width: 100%;
+    margin-top: 6px;
+}
+.config-field .custom-select-menu.open {
+    display: grid;
+}
