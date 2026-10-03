@@ -3334,3 +3334,16 @@ select[hidden] {
     padding-top: 8px;
     border-top: 1px solid var(--line);
 }
+
+
+/* Keep personalization and system health aligned on the reliability page. */
+@media (min-width: 1051px) {
+    .page#page-stats.analytics-view-reliability .system-card {
+        grid-column: span 3;
+    }
+}
+@media (min-width: 701px) and (max-width: 1050px) {
+    .page#page-stats.analytics-view-reliability .system-card {
+        grid-column: span 1;
+    }
+}
