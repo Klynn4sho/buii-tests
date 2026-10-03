@@ -357,7 +357,9 @@ function renderRecentJoins() {
   notifications.replaceChildren();
   activity.replaceChildren();
   document.getElementById("notificationCount").textContent = rows.length ? `${rows.length} recent` : "No recent joins";
-  document.getElementById("notificationDot").classList.toggle("show", rows.length > 0);
+  const newestJoin = rows[0] ? `${rows[0].join_date || ""}|${rows[0].user_name || ""}` : "";
+  const seenJoin = localStorage.getItem("buii-notifications-seen") || "";
+  document.getElementById("notificationDot").classList.toggle("show", Boolean(newestJoin && newestJoin !== seenJoin));
   if (!visibleRows.length) {
     const empty = document.createElement("div"); empty.className = "muted"; empty.style.padding = "12px"; empty.textContent = "No joins recorded yet.";
     notifications.appendChild(empty.cloneNode(true)); activity.appendChild(empty);
@@ -709,7 +711,15 @@ notificationBtn.addEventListener("click", e => {
   e.stopPropagation();
   const open = notificationMenu.classList.toggle("open");
   notificationBtn.setAttribute("aria-expanded", open);
-  if (open) { profileMenu.classList.remove("open"); profileBtn.setAttribute("aria-expanded", "false"); }
+  if (open) {
+    profileMenu.classList.remove("open");
+    profileBtn.setAttribute("aria-expanded", "false");
+    const newest = dashboardState.recentRows[0];
+    if (newest) {
+      localStorage.setItem("buii-notifications-seen", `${newest.join_date || ""}|${newest.user_name || ""}`);
+      document.getElementById("notificationDot").classList.remove("show");
+    }
+  }
 });
 function closeMenus() {
   profileMenu.classList.remove("open");
