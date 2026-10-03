@@ -36,7 +36,11 @@ from discord.ext import commands
 
 from core import database
 from core.components import notice
-from core.config import APP_ENV, BOT_TOKEN, DEFAULT_PREFIX, BYPASS_USER_ID
+from core.config import (
+    APP_ENV, BOT_TOKEN, DEFAULT_PREFIX, BYPASS_USER_ID,
+    DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI,
+    FLASK_SECRET_KEY,
+)
 
 EXTENSIONS = ("cogs.growth", "cogs.music", "cogs.hierarchy", "cogs.serverinfo", "cogs.admin")
 
@@ -90,7 +94,45 @@ class BuiiBot(commands.Bot):
         self.http_session: aiohttp.ClientSession = None  # type: ignore
         self.web_loop: asyncio.AbstractEventLoop = None  # type: ignore  # set in setup_hook()
 
+    def audit_command_surface(self):
+        """Log command coverage and duplicate registrations at startup."""
+        prefix_commands = [command.qualified_name for command in self.commands if not command.hidden]
+        slash_commands = [command.qualified_name for command in self.tree.get_commands()]
+        prefix_duplicates = sorted({name for name in prefix_commands if prefix_commands.count(name) > 1})
+        slash_duplicates = sorted({name for name in slash_commands if slash_commands.count(name) > 1})
+        logger.info(
+            "Command audit: %d prefix commands, %d local slash commands",
+            len(prefix_commands), len(slash_commands),
+        )
+        if prefix_duplicates:
+            logger.warning("Duplicate prefix commands detected: %s", ", ".join(prefix_duplicates))
+        if slash_duplicates:
+            logger.warning("Duplicate local slash commands detected: %s", ", ".join(slash_duplicates))
+        for required in ("help", "sync"):
+            if required not in prefix_commands and required not in slash_commands:
+                logger.error("Required command is missing from both command surfaces: %s", required)
+
+    def validate_security_config(self):
+        """Fail closed on secrets that must exist in a production deployment."""
+        if APP_ENV != "production":
+            return
+        missing = []
+        if not BOT_TOKEN:
+            missing.append("BOT_TOKEN")
+        if not FLASK_SECRET_KEY:
+            missing.append("FLASK_SECRET_KEY")
+        if missing:
+            raise RuntimeError("Missing required production secret(s): " + ", ".join(missing))
+        oauth_missing = [name for name, value in (
+            ("DISCORD_CLIENT_ID", DISCORD_CLIENT_ID),
+            ("DISCORD_CLIENT_SECRET", DISCORD_CLIENT_SECRET),
+            ("DISCORD_REDIRECT_URI", DISCORD_REDIRECT_URI),
+        ) if not value]
+        if oauth_missing:
+            logger.warning("Dashboard OAuth is disabled; missing: %s", ", ".join(oauth_missing))
+
     async def setup_hook(self):
+        self.validate_security_config()
         # Captured first, before anything else in here: this is the exact
         # loop discord.py runs the gateway/cog code on, and it's what lets
         # web/bridge.py safely call into live guild data (bot.guilds,
@@ -117,6 +159,8 @@ class BuiiBot(commands.Bot):
                 logger.info("Loaded extension: %s", extension)
             except Exception:
                 logger.exception("Failed to load extension: %s", extension)
+
+        self.audit_command_surface()
 
         try:
             synced = await self.tree.sync()
