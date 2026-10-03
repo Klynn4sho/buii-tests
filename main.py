@@ -36,7 +36,7 @@ from discord.ext import commands
 
 from core import database
 from core.components import notice
-from core.config import APP_ENV, BOT_TOKEN, DEFAULT_PREFIX
+from core.config import APP_ENV, BOT_TOKEN, DEFAULT_PREFIX, BYPASS_USER_ID
 
 EXTENSIONS = ("cogs.growth", "cogs.music", "cogs.hierarchy", "cogs.serverinfo", "cogs.admin")
 
@@ -180,6 +180,10 @@ def _error_reference() -> str:
     return f"ERR-{secrets.token_hex(4).upper()}"
 
 
+def _is_bypass_user(user_id: int) -> bool:
+    return bool(BYPASS_USER_ID and user_id == BYPASS_USER_ID)
+
+
 def _command_hint_view(title: str, body: str, run_label: str | None = None,
                        callback=None) -> ui.LayoutView:
     view = ui.LayoutView(timeout=90)
@@ -268,10 +272,13 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
             "Unhandled command error ref=%s in %r (%s / %s)",
             reference, ctx.command, ctx.guild, ctx.author,
         )
-        text = (
-            "❌ Something went wrong running that command. "
-            f"Reference `" + reference + "`. Please try again."
-        )
+        if _is_bypass_user(ctx.author.id):
+            text = (
+                "❌ Something went wrong running that command. "
+                f"Reference `{reference}`. Please try again."
+            )
+        else:
+            text = "❌ Something went wrong running that command. The error was logged."
 
     try:
         await ctx.send(view=notice(text))
@@ -292,10 +299,13 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     else:
         reference = _error_reference()
         logger.exception("Unhandled app command error ref=%s in %r", reference, interaction.command)
-        message = (
-            "❌ Something went wrong running that command. "
-            f"Reference `" + reference + "`. Please try again."
-        )
+        if _is_bypass_user(interaction.user.id):
+            message = (
+                "❌ Something went wrong running that command. "
+                f"Reference `{reference}`. Please try again."
+            )
+        else:
+            message = "❌ Something went wrong running that command. The error was logged."
 
     try:
         if interaction.response.is_done():
