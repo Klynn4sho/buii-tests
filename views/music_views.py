@@ -29,7 +29,7 @@ from core import database
 from core.config import RATING_WINDOW_HOURS
 from core.components import SimpleLayout, footer_line, notice
 from core.helpers import create_music_card, format_elapsed
-from core.music_utils import fetch_lyrics, remove_from_spotify
+from core.music_utils import fetch_audio_features, fetch_lyrics, remove_from_spotify
 
 
 def _track_text(title: str, artist: str, preview_url: str = None, url: str = None,
@@ -292,6 +292,72 @@ class PreviewButton(ui.Button):
 
 
 
+class AudioStatsButton(ui.Button):
+    def __init__(self, guild_id: int, song_id: int):
+        super().__init__(
+            label="♫ Audio Stats",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"audio-stats|{song_id}",
+        )
+        self.guild_id = guild_id
+        self.song_id = song_id
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            song = await database.get_song(self.guild_id, self.song_id)
+            session = getattr(interaction.client, "http_session", None)
+            features = await fetch_audio_features(
+                session, song.get("url") if song else None
+            )
+            if not features:
+                await interaction.response.send_message(
+                    view=notice(
+                        "ℹ️ Audio stats are only available for Spotify tracks "
+                        "when Spotify API access is configured."
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+            key_names = ("C", "C-sharp", "D", "D-sharp", "E", "F", "F-sharp", "G", "G-sharp", "A", "A-sharp", "B")
+            key_index = features.get("key")
+            key = "Unknown"
+            if isinstance(key_index, int) and 0 <= key_index < len(key_names):
+                mode = "Major" if features.get("mode") == 1 else "Minor"
+                key = f"{key_names[key_index]} {mode}"
+
+            def percent(value):
+                return f"{float(value) * 100:.0f}%" if value is not None else "—"
+
+            stats = (
+                f"## AUDIO FEATURES\n"
+                f"-# {song.get('title') or 'Unknown Title'} · {song.get('artist') or 'Unknown Artist'}\n\n"
+                f"**BPM**  ·  {float(features.get('tempo', 0)):.0f}\n"
+                f"**Key**  ·  {key}\n"
+                f"**Energy**  ·  {percent(features.get('energy'))}\n"
+                f"**Danceability**  ·  {percent(features.get('danceability'))}\n"
+                f"**Valence**  ·  {percent(features.get('valence'))}\n\n"
+                f"-# Spotify musical stats"
+            )
+            await interaction.response.send_message(
+                view=SimpleLayout(stats),
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception:
+            logger.exception("[music] audio stats lookup failed")
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    view=notice("❌ Couldn't fetch audio stats right now."),
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    view=notice("❌ Couldn't fetch audio stats right now."),
+                    ephemeral=True,
+                )
+
+
 class LyricsButton(ui.Button):
     def __init__(self, guild_id: int, song_id: int):
         super().__init__(
@@ -396,7 +462,7 @@ class RatingButton(ui.Button):
             self.guild_id, song["id"], song["song_number"], title=song["title"], artist=song["artist"],
             requester_name=song["requested_by_name"], avg=avg, count=count,
             preview_url=song["preview_url"], url=song["url"], card_file=new_file,
-            accent_rgb=dominant_rgb, vote_note=f"Your vote: {self.score}/10 — use buttons to change",
+            accent_rgb=dominant_rgb, vote_note=f"Latest vote: {self.score}/10 — use buttons to change",
             ping_text=(f"<@{song['requested_by_id']}>" if song.get("requested_by_id") else None),
             preview_used=bool(song.get("preview_used")),
         )
@@ -428,6 +494,7 @@ class RatingView(ui.LayoutView):
         link_buttons = [
             PreviewButton(guild_id, song_id, disabled=preview_used),
             LyricsButton(guild_id, song_id),
+            AudioStatsButton(guild_id, song_id),
         ]
         if url:
             link_buttons.append(ui.Button(label="↗ Source", style=discord.ButtonStyle.link, url=url))
