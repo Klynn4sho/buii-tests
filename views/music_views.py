@@ -307,7 +307,10 @@ class AudioStatsButton(ui.Button):
             song = await database.get_song(self.guild_id, self.song_id)
             session = getattr(interaction.client, "http_session", None)
             features = await fetch_audio_features(
-                session, song.get("url") if song else None
+                session,
+                song.get("url") if song else None,
+                song.get("title") if song else None,
+                song.get("artist") if song else None,
             )
             if not features:
                 await interaction.response.send_message(
