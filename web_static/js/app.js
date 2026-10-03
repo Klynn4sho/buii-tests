@@ -536,6 +536,7 @@ categoryButton.addEventListener("keydown", event => {
 const enhancedSelects = new Map();
 function enhanceSelect(select) {
   if (!select || enhancedSelects.has(select.id)) return;
+  select.hidden = true;
   select.classList.add("visually-hidden");
   const wrapper = document.createElement("div"); wrapper.className = "custom-select"; wrapper.id = select.id + "Custom";
   const button = document.createElement("button"); button.type = "button"; button.className = "custom-select-trigger"; button.setAttribute("aria-haspopup", "listbox"); button.setAttribute("aria-expanded", "false");
