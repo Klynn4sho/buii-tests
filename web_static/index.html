@@ -88,6 +88,12 @@
         <button class="nav-item" data-page="config"><span class="dot"></span>Configuration</button>
         <button class="nav-item" data-page="stats"><span class="dot"></span>Analytics</button>
       </nav>
+      <div class="section-label">Analytics sections</div>
+      <nav class="nav analytics-nav">
+        <button class="nav-item analytics-jump" data-page="stats" data-scroll-target="analytics-growth"><span class="dot"></span>Growth &amp; Retention</button>
+        <button class="nav-item analytics-jump" data-page="stats" data-scroll-target="analytics-music"><span class="dot"></span>Music Operations</button>
+        <button class="nav-item analytics-jump" data-page="stats" data-scroll-target="analytics-reliability"><span class="dot"></span>Reliability &amp; Admin</button>
+      </nav>
       <div class="section-label">Your servers</div>
       <div class="server-list" id="serverList">
         <div class="muted" style="padding:12px">Loading servers…</div>
@@ -290,11 +296,14 @@
             <h1>Statistics</h1>
             <p>Real numbers from BUII's own database and live connection — nothing here is simulated.</p>
           </div>
-          <select hidden class="period-select" id="growthPeriod">
-            <option value="30">Last 30 days</option>
-            <option value="7">Last 7 days</option>
-            <option value="90">Last 90 days</option>
-          </select>
+          <div class="page-header-actions">
+            <select hidden class="period-select" id="growthPeriod">
+              <option value="30">Last 30 days</option>
+              <option value="7">Last 7 days</option>
+              <option value="90">Last 90 days</option>
+            </select>
+            <button class="small-button" id="customizePanelsButton" type="button">Customize panels</button>
+          </div>
         </div>
 
         <div class="stats-grid">
@@ -307,7 +316,7 @@
           <div class="card analytics-detail"><span class="muted">Risk rate</span><strong id="anaRiskRate">—</strong><small>flagged accounts / joins</small></div>
           <div class="card analytics-detail"><span class="muted">Data freshness</span><strong id="anaFreshness">—</strong><small>last successful refresh</small></div>
 
-          <div class="analytics-section-heading">
+          <div class="analytics-section-heading" id="analytics-growth">
             <div><span class="section-kicker">Growth &amp; retention</span><h2>Understand who is joining and who stays</h2></div>
             <span class="section-caption">Live data will appear as the bot collects more history</span>
           </div>
@@ -370,7 +379,7 @@
             <div class="card-footer"><span class="muted" id="musicLogPageLabel">Page 1</span><div class="pager" id="musicLogPager"></div></div>
           </div>
 
-          <div class="analytics-section-heading">
+          <div class="analytics-section-heading" id="analytics-music">
             <div><span class="section-kicker">Music operations</span><h2>Keep the queue moving</h2></div>
             <span class="section-caption">Ratings, requests, playlist sync, and provider health</span>
           </div>
@@ -403,7 +412,7 @@
             <div class="requester-list" id="requesterList"><div class="muted" style="padding:8px 0">Loading…</div></div>
           </div>
 
-          <div class="analytics-section-heading">
+          <div class="analytics-section-heading" id="analytics-reliability">
             <div><span class="section-kicker">Reliability &amp; administration</span><h2>See what needs attention</h2></div>
             <span class="section-caption">Failures, command usage, and audit history</span>
           </div>
@@ -448,6 +457,14 @@
             <div class="health-row"><span>Playlist sync</span><strong id="healthSync">—</strong></div>
             <div class="health-row"><span>Sync queue</span><strong id="healthSyncQueue">—</strong></div>
           </div>
+        </div>
+        <div class="panel-customizer" id="panelCustomizer" hidden>
+          <div class="panel-customizer-header">
+            <div><strong>Customize analytics</strong><span>Choose which panels appear on this server view.</span></div>
+            <button class="icon-btn" id="closePanelCustomizer" type="button" aria-label="Close panel customization">×</button>
+          </div>
+          <div class="panel-customizer-list" id="panelCustomizerList"></div>
+          <button class="small-button" id="resetPanelsButton" type="button">Reset panels</button>
         </div>
       </section>
 
