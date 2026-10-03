@@ -453,7 +453,7 @@ async def search_spotify(session: aiohttp.ClientSession, query: str):
 
 async def search_song_metadata(session: aiohttp.ClientSession, query: str):
     first_result = None
-    for searcher in (search_spotify, search_deezer, search_itunes):
+    for searcher in (search_deezer, search_itunes, search_spotify):
         result = await searcher(session, query)
         if not result:
             continue
