@@ -24,12 +24,12 @@ from discord.ext import commands, tasks
 from core import database
 from core.checks import has_mod_permission
 from core.config import (
-    RATING_WINDOW_HOURS, COLOR_ACCENT, COLOR_SUCCESS,
+    RATING_WINDOW_HOURS, COLOR_SUCCESS,
     SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN,
     SPOTIFY_PLAYLIST_ID,
 )
 from core.components import SimpleLayout, Layout, footer_line, notice
-from core.helpers import create_music_card, format_elapsed, score_color
+from core.helpers import create_music_card, format_elapsed
 from core.music_utils import (
     find_music_link, fetch_song_metadata, search_song_metadata,
     lookup_song_genre, sync_to_spotify, remove_from_spotify,
@@ -59,6 +59,39 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
     def cog_unload(self):
         self.expiry_sweep_loop.cancel()
+
+    async def refresh_song_message(self, guild_id: int, song_id: int):
+        """Re-render the Pillow card so lifecycle status stays current."""
+        song = await database.get_song(guild_id, song_id)
+        if not song or not song.get("channel_id") or not song.get("message_id"):
+            return
+        channel = self.bot.get_channel(song["channel_id"])
+        if channel is None:
+            return
+        try:
+            message = await channel.fetch_message(song["message_id"])
+            avg, count = await database.get_song_stats(guild_id, song_id)
+            status = "playlist" if song.get("synced") else "closed" if song.get("closed") else "open"
+            card_bytes, dominant_rgb = await create_music_card(
+                self.bot.http_session, song["title"], song["artist"], song["cover_url"],
+                avg, count, genre=song["genre"], song_number=song["song_number"], status=status,
+            )
+            card_file = discord.File(fp=card_bytes, filename="rating_card.png")
+            if song.get("closed"):
+                view = ClosedRatingView()
+            else:
+                view = RatingView(
+                    guild_id, song["id"], song["song_number"],
+                    title=song["title"], artist=song["artist"],
+                    requester_name=song["requested_by_name"], avg=avg, count=count,
+                    preview_url=song["preview_url"], url=song["url"], card_file=card_file,
+                    accent_rgb=dominant_rgb,
+                    ping_text=(f"<@{song['requested_by_id']}>" if song.get("requested_by_id") else None),
+                    preview_used=bool(song.get("preview_used")),
+                )
+            await message.edit(view=view, attachments=[card_file])
+        except Exception:
+            logger.debug("Non-fatal song card refresh failure", exc_info=True)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -106,7 +139,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
                         message = await channel.fetch_message(row["message_id"])
                         song = await database.get_song(row["guild_id"], row["id"])
                         avg, count = await database.get_song_stats(row["guild_id"], row["id"])
-                        await message.edit(view=ClosedRatingView())
+                        await self.refresh_song_message(row["guild_id"], row["id"])
                     except Exception:
                         logger.debug("Non-fatal exception suppressed", exc_info=True)
         except asyncio.CancelledError:
@@ -190,7 +223,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         song_id = song_ref["id"]
         song_number = song_ref["song_number"]
 
-        card_bytes, dominant_rgb = await create_music_card(self.bot.http_session, title, artist, cover_url, 0.0, 0, genre=genre, song_number=song_number)
+        card_bytes, dominant_rgb = await create_music_card(self.bot.http_session, title, artist, cover_url, 0.0, 0, genre=genre, song_number=song_number, status="open")
         file = discord.File(fp=card_bytes, filename="rating_card.png")
 
         role_id_str, lock_time, _ = await database.async_get_music_config(guild_id)
@@ -261,7 +294,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             f"**Song ID:** `{song_id}` | **Overall:** ⭐ **{avg:.1f}/10** ({count} votes)\n\n"
             + "\n".join(lines) + "\n" + footer_line("Admin Rating Inspector")
         )
-        await ctx.send(view=SimpleLayout(text, accent=discord.Color.from_str(score_color(avg))), ephemeral=True)
+        await ctx.send(view=SimpleLayout(text), ephemeral=True)
 
     @commands.hybrid_command(name="closevoting", description="Freeze a song's score so no new votes can be cast.")
     @has_mod_permission()
@@ -278,17 +311,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         avg, count = await database.get_song_stats(ctx.guild.id, song["id"])
         artist_str = f" by **{song['artist']}**" if song["artist"] else ""
 
-        # Also grey out the live rating buttons on the original message, not
-        # just announce closure here — matches what the 12h auto-close sweep
-        # already does, so a manual close and a timed close look the same.
-        if song["channel_id"] and song["message_id"]:
-            channel = self.bot.get_channel(song["channel_id"])
-            if channel:
-                try:
-                    message = await channel.fetch_message(song["message_id"])
-                    await message.edit(view=ClosedRatingView())
-                except Exception:
-                    logger.debug("Non-fatal exception suppressed", exc_info=True)
+        await self.refresh_song_message(ctx.guild.id, song["id"])
 
         text = (
             "## 🔒 VOTING CLOSED\n"
@@ -297,8 +320,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             "*No further votes will be accepted for this track.*\n"
             + footer_line("Admin Voting Control")
         )
-        accent = discord.Color.from_str(score_color(avg)) if count > 0 else COLOR_ACCENT
-        await ctx.send(view=SimpleLayout(text, accent=accent))
+        await ctx.send(view=SimpleLayout(text))
 
     @commands.hybrid_command(name="spotify", aliases=["spotify_status", "spotifyinfo"], description="Show Spotify integration status without exposing secrets.")
     @has_mod_permission()
@@ -364,6 +386,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         success = await sync_to_spotify(self.bot.http_session, song["url"])
         if success:
             await database.mark_song_synced(ctx.guild.id, song["id"])
+            await self.refresh_song_message(ctx.guild.id, song["id"])
             artist_str = f" by **{song['artist']}**" if song["artist"] else ""
             text = (
                 "## ✅ SYNCED TO PLAYLIST\n"
