@@ -24,6 +24,17 @@ class ProjectHardeningTests(unittest.TestCase):
         self.assertEqual(js.count("innerHTML = html"), 1)
         self.assertNotIn("onclick=", js)
 
+    def test_dashboard_session_stays_small_and_guilds_are_live(self):
+        api = (ROOT / "web" / "api.py").read_text()
+        bridge = (ROOT / "web" / "bridge.py").read_text()
+        app = (ROOT / "web" / "app.py").read_text()
+        self.assertIn("session.clear()", api)
+        self.assertIn("get_user_manageable_guilds", api)
+        self.assertNotIn('session["manageable_guilds"] = manageable', api)
+        self.assertIn("async def get_user_manageable_guilds", bridge)
+        self.assertIn('SESSION_COOKIE_NAME="buii_session"', app)
+        self.assertIn('SESSION_COOKIE_PATH="/"', app)
+
     def test_live_permission_and_config_validation_are_wired(self):
         api = (ROOT / "web" / "api.py").read_text()
         bridge = (ROOT / "web" / "bridge.py").read_text()
