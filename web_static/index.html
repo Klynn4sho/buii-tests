@@ -307,6 +307,29 @@
           <div class="card analytics-detail"><span class="muted">Risk rate</span><strong id="anaRiskRate">—</strong><small>flagged accounts / joins</small></div>
           <div class="card analytics-detail"><span class="muted">Data freshness</span><strong id="anaFreshness">—</strong><small>last successful refresh</small></div>
 
+          <div class="analytics-section-heading">
+            <div><span class="section-kicker">Growth &amp; retention</span><h2>Understand who is joining and who stays</h2></div>
+            <span class="section-caption">Live data will appear as the bot collects more history</span>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Invite conversion funnel</h2><span class="muted">Created → joined → retained</span></div><span class="panel-badge">Planned</span></div>
+            <div class="empty-flow">
+              <div><span class="flow-value">—</span><small>Invite uses</small></div><i>→</i>
+              <div><span class="flow-value">—</span><small>New joins</small></div><i>→</i>
+              <div><span class="flow-value">—</span><small>7-day retained</small></div>
+            </div>
+            <p class="empty-note">Retention tracking will make invite quality visible, not just invite volume.</p>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Member retention</h2><span class="muted">Cohorts by join date</span></div><span class="panel-badge">Planned</span></div>
+            <div class="metric-placeholder"><span>7-day retention</span><strong>—</strong></div>
+            <div class="metric-placeholder"><span>30-day retention</span><strong>—</strong></div>
+            <div class="metric-placeholder"><span>Returning members</span><strong>—</strong></div>
+            <p class="empty-note">This panel will show whether recent growth is becoming an active community.</p>
+          </div>
+
           <div class="card chart-card">
             <div class="card-title"><div><h2>Member growth</h2><span class="muted" id="growthSubtitle">Daily joins</span></div><strong id="growthTotal">—</strong></div>
             <div class="chart"><div class="chart-line" id="growthChart"></div></div>
@@ -331,9 +354,48 @@
             <div class="card-footer"><span class="muted" id="musicLogPageLabel">Page 1</span><div class="pager" id="musicLogPager"></div></div>
           </div>
 
+          <div class="analytics-section-heading">
+            <div><span class="section-kicker">Music operations</span><h2>Keep the queue moving</h2></div>
+            <span class="section-caption">Ratings, requests, playlist sync, and provider health</span>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Open voting queue</h2><span class="muted">Tracks waiting for ratings</span></div><span class="panel-badge">Planned</span></div>
+            <div class="empty-state compact"><strong>No open queue data yet</strong><span>Active songs, vote progress, and time remaining will appear here.</span></div>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Provider reliability</h2><span class="muted">Playback and metadata sources</span></div><span class="panel-badge">Planned</span></div>
+            <div class="metric-placeholder"><span>Successful lookups</span><strong>—</strong></div>
+            <div class="metric-placeholder"><span>Failed lookups</span><strong>—</strong></div>
+            <div class="metric-placeholder"><span>Average response</span><strong>—</strong></div>
+          </div>
+
           <div class="card requester-card">
             <div class="card-title"><div><h2>Most active requesters</h2><span class="card-updated" id="requestersUpdated">Not loaded</span></div><span class="muted">Songs added</span></div>
             <div class="requester-list" id="requesterList"><div class="muted" style="padding:8px 0">Loading…</div></div>
+          </div>
+
+          <div class="analytics-section-heading">
+            <div><span class="section-kicker">Reliability &amp; administration</span><h2>See what needs attention</h2></div>
+            <span class="section-caption">Failures, command usage, and audit history</span>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Sync failures &amp; retries</h2><span class="muted">Playlist and metadata jobs</span></div><span class="panel-badge">Planned</span></div>
+            <div class="empty-state compact"><strong>No failed jobs recorded</strong><span>Retryable failures and their next action will appear here.</span></div>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Command activity</h2><span class="muted">Usage and error rate</span></div><span class="panel-badge">Planned</span></div>
+            <div class="metric-placeholder"><span>Commands today</span><strong>—</strong></div>
+            <div class="metric-placeholder"><span>Most used command</span><strong>—</strong></div>
+            <div class="metric-placeholder"><span>Error rate</span><strong>—</strong></div>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Admin activity log</h2><span class="muted">Recent configuration changes</span></div><span class="panel-badge">Planned</span></div>
+            <div class="empty-state compact"><strong>No admin events yet</strong><span>Config changes, retries, and moderation actions will be listed here.</span></div>
           </div>
 
           <div class="card system-card">
