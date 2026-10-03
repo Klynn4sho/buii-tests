@@ -599,22 +599,60 @@ document.addEventListener("click", event => {
   });
 });
 
-const pages = ["home", "commands", "config", "stats"];
+const pages = ["home", "commands", "config", "stats", "stats-growth", "stats-music", "stats-reliability"];
+let currentAnalyticsView = "overview";
+
+function prepareAnalyticsGroups() {
+  const grid = document.querySelector("#page-stats .stats-grid");
+  if (!grid) return;
+  let group = "overview";
+  [...grid.children].forEach(child => {
+    if (child.classList.contains("analytics-section-heading")) {
+      group = child.id.replace("analytics-", "") || "overview";
+    }
+    child.dataset.analyticsGroup = group;
+  });
+}
+
+function applyAnalyticsView(view = "overview") {
+  prepareAnalyticsGroups();
+  currentAnalyticsView = view;
+  const page = document.getElementById("page-stats");
+  page?.classList.remove("analytics-view-overview", "analytics-view-growth", "analytics-view-music", "analytics-view-reliability");
+  page?.classList.add("analytics-view-" + view);
+  document.querySelectorAll("#page-stats .stats-grid > *").forEach(child => {
+    const inView = view === "overview" ? child.dataset.analyticsGroup === "overview" : child.dataset.analyticsGroup === view;
+    const customHidden = child.dataset.customHidden === "true";
+    child.hidden = customHidden || !inView;
+  });
+  const title = document.getElementById("statsPageTitle");
+  const subtitle = document.getElementById("statsPageSubtitle");
+  const copy = {
+    overview: ["Statistics", "A high-level view of your server's growth, music, and system health."],
+    growth: ["Growth & Retention", "Invite quality, member retention, growth comparisons, and risk signals."],
+    music: ["Music Operations", "Ratings, voting activity, requesters, song logs, and provider reliability."],
+    reliability: ["Reliability & Admin", "Sync failures, command activity, exports, audit history, and system health."],
+  }[view] || ["Statistics", "Real numbers from BUII's own database and live connection — nothing here is simulated."];
+  if (title) title.textContent = copy[0];
+  if (subtitle) subtitle.textContent = copy[1];
+}
+
 function showPage(page) {
   if (!pages.includes(page)) page = "home";
+  const basePage = page.startsWith("stats-") ? "stats" : page;
+  const analyticsView = page === "stats" ? "overview" : page.startsWith("stats-") ? page.replace("stats-", "") : null;
   document.querySelectorAll(".page").forEach(s => s.classList.remove("active-page"));
-  const target = document.getElementById("page-" + page);
+  const target = document.getElementById("page-" + basePage);
   if (target) target.classList.add("active-page");
-  document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.page === page));
-  document.querySelectorAll(".mobile-nav-item").forEach(b => b.classList.toggle("active", b.dataset.page === page));
+  if (analyticsView) applyAnalyticsView(analyticsView);
+  document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.page === page || (analyticsView && b.dataset.page === "stats")));
+  document.querySelectorAll(".mobile-nav-item").forEach(b => b.classList.toggle("active", b.dataset.page === basePage));
   history.replaceState(null, "", "#" + page);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 document.querySelectorAll("[data-page]").forEach(btn => btn.addEventListener("click", () => {
   showPage(btn.dataset.page);
-  const targetId = btn.dataset.scrollTarget;
-  if (targetId) setTimeout(() => document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
   closeMenus();
 }));
 document.getElementById("viewActivityButton").addEventListener("click", () => { showPage("stats"); closeMenus(); });
@@ -748,8 +786,9 @@ function applyPanelPrefs() {
   analyticsPanels().forEach((card, index) => {
     const key = card.dataset.panelKey || `panel-${index}`;
     card.dataset.panelKey = key;
-    card.hidden = prefs[key] === false;
+    card.dataset.customHidden = prefs[key] === false ? "true" : "false";
   });
+  if (typeof applyAnalyticsView === "function") applyAnalyticsView(currentAnalyticsView);
 }
 
 function renderPanelCustomizer() {
@@ -768,7 +807,8 @@ function renderPanelCustomizer() {
       const nextPrefs = readPanelPrefs();
       nextPrefs[key] = checkbox.checked;
       localStorage.setItem(PANEL_PREFS_KEY, JSON.stringify(nextPrefs));
-      card.hidden = !checkbox.checked;
+      card.dataset.customHidden = checkbox.checked ? "false" : "true";
+      applyAnalyticsView(currentAnalyticsView);
     });
     const text = document.createElement("span");
     text.textContent = panelTitle(card, index);
