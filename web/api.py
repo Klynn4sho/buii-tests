@@ -22,7 +22,7 @@ import requests
 from flask import Blueprint, current_app, jsonify, redirect, request, session
 
 from core import database
-from core.config import DASHBOARD_REQUIRED_PERMS
+from core.config import DASHBOARD_REQUIRED_PERMS, SPOTIFY_PLAYLIST_ID
 from web import bridge, oauth
 from web.commands_manifest import COMMANDS, CATEGORY_LABELS
 
@@ -268,6 +268,27 @@ def guild_music_log(guild_id):
 # Config (mirrors /setlog, /setalertrole, /setmodrole, /setprefix,
 # /setmusicchannel, /setmusicrole, /setmusiclock exactly)
 # ======================================================================
+
+@bp.route("/api/guilds/<guild_id>/music-insights")
+@guild_access_required
+def guild_music_insights(guild_id):
+    data = database._raw_get_music_insights(int(guild_id), limit=5)
+    sync = data["sync"] or {}
+    return jsonify({
+        "requesters": [
+            {"name": r["requester"], "songs": int(r["songs"]),
+             "last_requested": r["last_requested"].isoformat() if r["last_requested"] else None}
+            for r in data["requesters"]
+        ],
+        "sync": {
+            "playlist_configured": bool(SPOTIFY_PLAYLIST_ID),
+            "total": int(sync.get("total") or 0),
+            "synced": int(sync.get("synced") or 0),
+            "pending": int(sync.get("pending") or 0),
+            "last_added": sync.get("last_added").isoformat() if sync.get("last_added") else None,
+        },
+    })
+
 
 @bp.route("/api/guilds/<guild_id>/config")
 @guild_access_required
