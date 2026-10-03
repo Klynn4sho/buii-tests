@@ -39,6 +39,16 @@ class ProjectHardeningTests(unittest.TestCase):
         api = (ROOT / "web" / "api.py").read_text()
         self.assertIn("limit=limit, newest_first=True", api)
 
+    def test_dashboard_command_manifest_covers_new_commands(self):
+        manifest = (ROOT / "web" / "commands_manifest.py").read_text()
+        for command in (
+            "analytics", "userinfo", "memberhistory", "serverinfo",
+            "diagnostics", "storage", "spotify", "musicprofile",
+        ):
+            self.assertRegex(manifest, rf'"name": "{command}"')
+        self.assertNotRegex(manifest, r'\{"name": "myratings"')
+        self.assertIn('"server": "Server Information"', manifest)
+
     def test_production_server_and_security_headers(self):
         main = (ROOT / "main.py").read_text()
         app = (ROOT / "web" / "app.py").read_text()
