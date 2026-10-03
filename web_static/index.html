@@ -103,7 +103,7 @@
             <div>
               <div class="eyebrow">Server overview</div>
               <h1>Make your server feel alive.</h1>
-              <p>Manage BUII without digging through Discord's command list. Growth, music ratings and staff structure, all in one place.</p>
+              <p>Growth, music ratings, staff structure, and server health in one focused view.</p><div class="hero-status"><span class="live-dot"></span> Live data · refresh on demand</div>
             </div>
             <div class="server-chip">
               <div class="server-icon" id="heroServerIcon">··</div>
@@ -164,13 +164,23 @@
         </div>
         <div class="toolbar">
           <div class="search"><span>⌕</span><input id="commandSearch" type="text" placeholder="Search commands..."></div>
-          <select id="commandCategory">
+          <select id="commandCategory" class="visually-hidden" aria-hidden="true">
             <option value="all">All categories</option>
             <option value="music">Music</option>
             <option value="growth">Invites &amp; Growth</option>
             <option value="staff">Staff Directory</option>
             <option value="admin">Admin</option>
           </select>
+          <div class="custom-select" id="commandCategorySelect">
+            <button class="custom-select-trigger" id="commandCategoryButton" type="button" aria-haspopup="listbox" aria-expanded="false">All categories <span>⌄</span></button>
+            <div class="custom-select-menu" role="listbox" aria-label="Command category">
+              <button type="button" role="option" data-category="all" aria-selected="true">All categories</button>
+              <button type="button" role="option" data-category="music" aria-selected="false">Music</button>
+              <button type="button" role="option" data-category="growth" aria-selected="false">Invites &amp; Growth</button>
+              <button type="button" role="option" data-category="staff" aria-selected="false">Staff Directory</button>
+              <button type="button" role="option" data-category="admin" aria-selected="false">Admin</button>
+            </div>
+          </div>
         </div>
         <div class="command-list" id="commandList"><div class="muted" style="padding:12px">Loading…</div></div>
       </section>
@@ -288,10 +298,14 @@
         </div>
 
         <div class="stats-grid">
-          <div class="card analytics-number"><span class="muted">Total members</span><strong id="anaMembers">—</strong></div>
-          <div class="card analytics-number"><span class="muted">Total joins logged</span><strong id="anaTotalJoins">—</strong></div>
-          <div class="card analytics-number"><span class="muted">Joins (24h)</span><strong id="anaJoins24h">—</strong></div>
-          <div class="card analytics-number"><span class="muted">Flagged accounts</span><strong id="anaRisk">—</strong></div>
+          <div class="card analytics-number"><span class="muted">Total members</span><strong id="anaMembers">—</strong><small>current server size</small></div>
+          <div class="card analytics-number"><span class="muted">Total joins logged</span><strong id="anaTotalJoins">—</strong><small>all tracked time</small></div>
+          <div class="card analytics-number"><span class="muted">Joins (24h)</span><strong id="anaJoins24h">—</strong><small>recent activity</small></div>
+          <div class="card analytics-number"><span class="muted">Flagged accounts</span><strong id="anaRisk">—</strong><small>under 7 days old</small></div>
+          <div class="card analytics-detail"><span class="muted">Join velocity</span><strong id="anaDailyAvg">—</strong><small>average joins per day</small></div>
+          <div class="card analytics-detail"><span class="muted">Peak day</span><strong id="anaPeakDay">—</strong><small id="anaPeakJoins">waiting for growth data</small></div>
+          <div class="card analytics-detail"><span class="muted">Risk rate</span><strong id="anaRiskRate">—</strong><small>flagged accounts / joins</small></div>
+          <div class="card analytics-detail"><span class="muted">Data freshness</span><strong id="anaFreshness">—</strong><small>last successful refresh</small></div>
 
           <div class="card chart-card">
             <div class="card-title"><div><h2>Member growth</h2><span class="muted" id="growthSubtitle">Daily joins</span></div><strong id="growthTotal">—</strong></div>
