@@ -133,15 +133,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             for row in expired:
                 await database.close_song(row["guild_id"], row["id"])
                 await self.sync_qualifying_locked_song(row["guild_id"], row["id"])
-                channel = self.bot.get_channel(row["channel_id"]) if row["channel_id"] else None
-                if channel and row["message_id"]:
-                    try:
-                        message = await channel.fetch_message(row["message_id"])
-                        song = await database.get_song(row["guild_id"], row["id"])
-                        avg, count = await database.get_song_stats(row["guild_id"], row["id"])
-                        await self.refresh_song_message(row["guild_id"], row["id"])
-                    except Exception:
-                        logger.debug("Non-fatal exception suppressed", exc_info=True)
+                await self.refresh_song_message(row["guild_id"], row["id"])
         except asyncio.CancelledError:
             raise
         except Exception as error:
