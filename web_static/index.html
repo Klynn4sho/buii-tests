@@ -330,6 +330,22 @@
             <p class="empty-note">This panel will show whether recent growth is becoming an active community.</p>
           </div>
 
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Growth comparison</h2><span class="muted">Current period vs previous</span></div><span class="panel-badge">Planned</span></div>
+            <div class="metric-placeholder"><span>Join change</span><strong>—</strong></div>
+            <div class="metric-placeholder"><span>Member change</span><strong>—</strong></div>
+            <div class="metric-placeholder"><span>Best period</span><strong>—</strong></div>
+            <p class="empty-note">Compare the selected window with the previous one to spot acceleration or slowdown.</p>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Risk breakdown</h2><span class="muted">Why accounts are flagged</span></div><span class="panel-badge">Planned</span></div>
+            <div class="metric-placeholder"><span>New-account risk</span><strong>—</strong></div>
+            <div class="metric-placeholder"><span>Invite anomaly risk</span><strong>—</strong></div>
+            <div class="metric-placeholder"><span>Unresolved flags</span><strong>—</strong></div>
+            <p class="empty-note">Turn the single flagged-account number into an actionable moderation view.</p>
+          </div>
+
           <div class="card chart-card">
             <div class="card-title"><div><h2>Member growth</h2><span class="muted" id="growthSubtitle">Daily joins</span></div><strong id="growthTotal">—</strong></div>
             <div class="chart"><div class="chart-line" id="growthChart"></div></div>
@@ -371,6 +387,17 @@
             <div class="metric-placeholder"><span>Average response</span><strong>—</strong></div>
           </div>
 
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Song rating distribution</h2><span class="muted">Scores across the catalog</span></div><span class="panel-badge">Planned</span></div>
+            <div class="rating-bars">
+              <div><span>1–2</span><i><b style="width:0%"></b></i><strong>—</strong></div>
+              <div><span>3–4</span><i><b style="width:0%"></b></i><strong>—</strong></div>
+              <div><span>5–6</span><i><b style="width:0%"></b></i><strong>—</strong></div>
+              <div><span>7–8</span><i><b style="width:0%"></b></i><strong>—</strong></div>
+              <div><span>9–10</span><i><b style="width:0%"></b></i><strong>—</strong></div>
+            </div>
+          </div>
+
           <div class="card requester-card">
             <div class="card-title"><div><h2>Most active requesters</h2><span class="card-updated" id="requestersUpdated">Not loaded</span></div><span class="muted">Songs added</span></div>
             <div class="requester-list" id="requesterList"><div class="muted" style="padding:8px 0">Loading…</div></div>
@@ -396,6 +423,21 @@
           <div class="card insight-card">
             <div class="card-title"><div><h2>Admin activity log</h2><span class="muted">Recent configuration changes</span></div><span class="panel-badge">Planned</span></div>
             <div class="empty-state compact"><strong>No admin events yet</strong><span>Config changes, retries, and moderation actions will be listed here.</span></div>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Data exports</h2><span class="muted">Download your server history</span></div><span class="panel-badge">Planned</span></div>
+            <div class="export-actions">
+              <button class="small-button" type="button" disabled>Export joins</button>
+              <button class="small-button" type="button" disabled>Export songs</button>
+              <button class="small-button" type="button" disabled>Export activity</button>
+            </div>
+            <p class="empty-note">Exports will respect the selected date range and your server permissions.</p>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-title"><div><h2>Dashboard personalization</h2><span class="muted">Choose what appears first</span></div><span class="panel-badge">Planned</span></div>
+            <div class="empty-state compact"><strong>Personal layouts are coming next</strong><span>Pin the panels you use most and hide sections that are not relevant to your server.</span></div>
           </div>
 
           <div class="card system-card">
