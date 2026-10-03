@@ -173,7 +173,8 @@ class LyricsButton(ui.Button):
             if len(lyrics) > len(excerpt):
                 excerpt += "\n…"
             text = f"## {song['title']}\n-# {song['artist']}\n\n{excerpt}"
-            await interaction.followup.send(view=SimpleLayout(text), ephemeral=True,\n                                           allowed_mentions=discord.AllowedMentions.none())
+            await interaction.followup.send(view=SimpleLayout(text), ephemeral=True,
+                                           allowed_mentions=discord.AllowedMentions.none())
         except Exception:
             logger.exception("[music] lyrics lookup failed")
             if interaction.response.is_done():
