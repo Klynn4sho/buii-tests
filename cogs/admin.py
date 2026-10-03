@@ -116,31 +116,40 @@ class AdminCog(commands.Cog, name="AdminCog"):
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.defer(ephemeral=True)
         try:
-            if option == "clear":
-                self.bot.tree.clear_commands(guild=ctx.guild)
-                await self.bot.tree.sync(guild=ctx.guild)
-                message = "🧹 **Cleared all guild slash commands!**"
-            else:
-                # Keep commands in one scope only. Global commands are visible
-                # everywhere; leaving guild copies behind makes Discord show
-                # duplicate entries in the slash-command picker.
+            normalized = (option or "").strip().lower()
+            if normalized not in {"", "global", "clear"}:
+                message = "❌ Use \`/sync\`, \`/sync global\`, or \`/sync clear\`."
+            elif normalized == "clear":
+                if not ctx.guild:
+                    message = "❌ Guild command cleanup can only run inside a server."
+                else:
+                    guild = discord.Object(id=ctx.guild.id)
+                    self.bot.tree.clear_commands(guild=guild)
+                    await self.bot.tree.sync(guild=guild)
+                    message = "🧹 **Cleared this server's slash commands.**"
+            elif normalized == "global" or not ctx.guild:
                 synced = await self.bot.tree.sync()
-                self.bot.tree.clear_commands(guild=ctx.guild)
-                await self.bot.tree.sync(guild=ctx.guild)
-                message = (
-                    f"⚡ **Synced {len(synced)} global commands and removed "
-                    "duplicate server-specific copies.**"
-                )
+                message = f"🌐 **Synced {len(synced)} global slash commands.**"
+            else:
+                # Guild sync replaces stale command IDs immediately, which is
+                # important while Discord's global command cache propagates.
+                guild = discord.Object(id=ctx.guild.id)
+                self.bot.tree.copy_global_to(guild=guild)
+                synced = await self.bot.tree.sync(guild=guild)
+                message = f"⚡ **Synced {len(synced)} slash commands for this server.**"
+
             if ctx.interaction and ctx.interaction.response.is_done():
                 await ctx.followup.send(view=notice(message), ephemeral=True)
             else:
                 await ctx.send(view=notice(message))
-        except discord.HTTPException as e:
+        except discord.HTTPException:
             logger.exception("[sync] operation failed")
+            message = "❌ Discord rejected the sync request — check the bot's command permissions and try again."
             if ctx.interaction and ctx.interaction.response.is_done():
-                await ctx.followup.send(view=notice("❌ Discord rejected the sync request — try again shortly."), ephemeral=True)
+                await ctx.followup.send(view=notice(message), ephemeral=True)
             else:
-                await ctx.send(view=notice("❌ Discord rejected the sync request — try again shortly."))
+                await ctx.send(view=notice(message))
+
 
     @sync_commands.error
     async def sync_commands_error(self, ctx: commands.Context, error: commands.CommandError):
