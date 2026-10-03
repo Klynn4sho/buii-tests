@@ -2929,3 +2929,8 @@ p {
         justify-items: start;
     }
 }
+
+select.visually-hidden,
+select[hidden] {
+    display: none !important;
+}
