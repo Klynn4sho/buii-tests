@@ -611,7 +611,12 @@ function showPage(page) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-document.querySelectorAll("[data-page]").forEach(btn => btn.addEventListener("click", () => { showPage(btn.dataset.page); closeMenus(); }));
+document.querySelectorAll("[data-page]").forEach(btn => btn.addEventListener("click", () => {
+  showPage(btn.dataset.page);
+  const targetId = btn.dataset.scrollTarget;
+  if (targetId) setTimeout(() => document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+  closeMenus();
+}));
 document.getElementById("viewActivityButton").addEventListener("click", () => { showPage("stats"); closeMenus(); });
 document.getElementById("refreshRecentJoinsButton").addEventListener("click", () => loadRecentJoins(currentGuildId));
 document.getElementById("refreshDashboardButton").addEventListener("click", async () => {
@@ -712,5 +717,88 @@ document.getElementById("themeBtn").addEventListener("click", e => {
   profileMenu.classList.remove("open");
   notificationMenu.classList.remove("open");
 });
+
+
+const panelCustomizer = document.getElementById("panelCustomizer");
+const panelCustomizerList = document.getElementById("panelCustomizerList");
+const customizePanelsButton = document.getElementById("customizePanelsButton");
+const closePanelCustomizer = document.getElementById("closePanelCustomizer");
+const resetPanelsButton = document.getElementById("resetPanelsButton");
+const PANEL_PREFS_KEY = "buii-analytics-panels";
+
+function analyticsPanels() {
+  return [...document.querySelectorAll("#page-stats .stats-grid > .card:not(.analytics-number):not(.analytics-detail)")];
+}
+
+function panelTitle(card, index) {
+  return card.querySelector("h2")?.textContent?.trim() || `Panel ${index + 1}`;
+}
+
+function readPanelPrefs() {
+  try {
+    const value = JSON.parse(localStorage.getItem(PANEL_PREFS_KEY) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function applyPanelPrefs() {
+  const prefs = readPanelPrefs();
+  analyticsPanels().forEach((card, index) => {
+    const key = card.dataset.panelKey || `panel-${index}`;
+    card.dataset.panelKey = key;
+    card.hidden = prefs[key] === false;
+  });
+}
+
+function renderPanelCustomizer() {
+  if (!panelCustomizerList) return;
+  const prefs = readPanelPrefs();
+  panelCustomizerList.replaceChildren();
+  analyticsPanels().forEach((card, index) => {
+    const key = card.dataset.panelKey || `panel-${index}`;
+    card.dataset.panelKey = key;
+    const label = document.createElement("label");
+    label.className = "panel-toggle";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = prefs[key] !== false;
+    checkbox.addEventListener("change", () => {
+      const nextPrefs = readPanelPrefs();
+      nextPrefs[key] = checkbox.checked;
+      localStorage.setItem(PANEL_PREFS_KEY, JSON.stringify(nextPrefs));
+      card.hidden = !checkbox.checked;
+    });
+    const text = document.createElement("span");
+    text.textContent = panelTitle(card, index);
+    label.append(checkbox, text);
+    panelCustomizerList.appendChild(label);
+  });
+}
+
+function openPanelCustomizer() {
+  renderPanelCustomizer();
+  panelCustomizer.hidden = false;
+  customizePanelsButton?.setAttribute("aria-expanded", "true");
+}
+
+function closePanelCustomizerMenu() {
+  if (panelCustomizer) panelCustomizer.hidden = true;
+  customizePanelsButton?.setAttribute("aria-expanded", "false");
+}
+
+customizePanelsButton?.addEventListener("click", () => {
+  if (panelCustomizer?.hidden) openPanelCustomizer();
+  else closePanelCustomizerMenu();
+});
+closePanelCustomizer?.addEventListener("click", closePanelCustomizerMenu);
+resetPanelsButton?.addEventListener("click", () => {
+  localStorage.removeItem(PANEL_PREFS_KEY);
+  applyPanelPrefs();
+  renderPanelCustomizer();
+  toast("All analytics panels restored");
+});
+applyPanelPrefs();
 
 boot();
