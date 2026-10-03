@@ -69,6 +69,32 @@ async def get_manageable_guild_ids(bot, guild_ids: list) -> list:
     return [gid for gid in guild_ids if gid in bot_guild_ids]
 
 
+async def get_user_manageable_guilds(bot, user_id: int) -> list:
+    """Build the dashboard server list from live bot state.
+
+    The browser session stores only the user's Discord identity, not a
+    potentially huge OAuth guild list. This avoids oversized Flask session
+    cookies and keeps membership/permissions current after login.
+    """
+    results = []
+    for guild in bot.guilds:
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                continue
+        perms = member.guild_permissions
+        if not (perms.administrator or perms.manage_guild):
+            continue
+        results.append({
+            "id": str(guild.id),
+            "name": guild.name,
+            "icon_url": guild.icon.url if guild.icon else None,
+        })
+    return results
+
+
 async def get_guild_summary(bot, guild_id: int) -> dict | None:
     guild = bot.get_guild(guild_id)
     if guild is None:
