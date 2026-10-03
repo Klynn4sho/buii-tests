@@ -191,6 +191,23 @@ async def search_deezer(session: aiohttp.ClientSession, query: str):
     return None
 
 
+async def fetch_lyrics(session: aiohttp.ClientSession, title: str, artist: str):
+    """Fetch plain lyrics for the optional ephemeral Lyrics button."""
+    if not title or not artist:
+        return None
+    endpoint = f"https://api.lyrics.ovh/v1/{quote(str(artist), safe='')}/{quote(str(title), safe='')}"
+    try:
+        async with session.get(endpoint, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json(content_type=None)
+            lyrics = (data.get("lyrics") or "").strip()
+            return lyrics or None
+    except Exception:
+        logger.debug("Lyrics lookup failed", exc_info=True)
+        return None
+
+
 _spotify_token_cache = {"token": None, "expires_at": 0.0}
 
 _spotify_user_token_cache = {"token": SPOTIFY_USER_TOKEN, "expires_at": 0.0}
