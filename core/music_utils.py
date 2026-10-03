@@ -296,36 +296,92 @@ async def search_spotify_track(
         return None
 
 
-async def fetch_audio_features(
+async def fetch_deezer_audio_features(
     session: aiohttp.ClientSession,
     track_url: str = None,
     title: str = None,
     artist: str = None,
 ):
-    """Fetch Spotify musical stats, resolving non-Spotify songs by metadata."""
-    track = await search_spotify_track(session, title, artist, track_url)
-    if not track:
-        return None
-
-    track_id = track.get("id")
-    if not track_id:
-        return None
-
-    token = await _get_spotify_token(session)
-    if not token:
+    """Fetch public Deezer track metadata without requiring Spotify access."""
+    if not session:
         return None
 
     try:
-        async with session.get(
-            f"https://api.spotify.com/v1/audio-features/{track_id}",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=aiohttp.ClientTimeout(total=8),
-        ) as resp:
-            if resp.status != 200:
+        track_id = None
+        if track_url and "deezer.com/track/" in track_url:
+            match = re.search(r"/track/(\d+)", track_url)
+            track_id = match.group(1) if match else None
+
+        if track_id:
+            async with session.get(
+                f"https://api.deezer.com/track/{track_id}",
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                track = await resp.json(content_type=None)
+        else:
+            clean_title = _clean_track_term(title)
+            clean_artist = _clean_track_term(artist)
+            query = f"{clean_artist} {clean_title}".strip()
+            if not query:
                 return None
-            return await resp.json(content_type=None)
+
+            async with session.get(
+                "https://api.deezer.com/search",
+                params={"q": query, "limit": 10},
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                items = (await resp.json(content_type=None)).get("data") or []
+                if not items:
+                    return None
+
+            title_fold = clean_title.casefold()
+            artist_fold = clean_artist.casefold()
+
+            def rank(item):
+                item_title = _clean_track_term(item.get("title")).casefold()
+                item_artist = _clean_track_term(
+                    (item.get("artist") or {}).get("name")
+                ).casefold()
+                return (
+                    item_title != title_fold,
+                    bool(artist_fold) and item_artist != artist_fold,
+                    not bool(item.get("preview")),
+                )
+
+            track_id = str(sorted(items, key=rank)[0].get("id") or "")
+            if not track_id:
+                return None
+
+            async with session.get(
+                f"https://api.deezer.com/track/{track_id}",
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                track = await resp.json(content_type=None)
+
+        if not track or not track.get("id"):
+            return None
+
+        album = track.get("album") or {}
+        track_artist = track.get("artist") or {}
+        return {
+            "provider": "Deezer",
+            "id": track.get("id"),
+            "title": track.get("title"),
+            "artist": track_artist.get("name"),
+            "tempo": track.get("bpm"),
+            "loudness": track.get("gain"),
+            "genre": (track.get("genre") or {}).get("name"),
+            "preview_url": track.get("preview"),
+            "cover_url": album.get("cover_big") or album.get("cover"),
+        }
     except Exception:
-        logger.debug("Audio feature lookup failed", exc_info=True)
+        logger.debug("Deezer audio metadata lookup failed", exc_info=True)
         return None
 
 
@@ -335,42 +391,12 @@ async def fetch_canonical_preview(
     title: str,
     artist: str = None,
 ):
-    """Return a canonical preview URL when the source is a variant upload."""
-    if not session or not title or _spotify_track_id(source_url):
+    """Return a canonical Deezer preview for a variant upload."""
+    if not session or not title or (source_url and "deezer.com/track/" in source_url):
         return None
 
-    track = await search_spotify_track(session, title, artist)
-    if track and track.get("preview_url"):
-        return track["preview_url"]
-
-    # Spotify often omits preview_url. Use Deezer as a compatible preview
-    # fallback, but only after the canonical Spotify match was attempted.
-    clean_title = _clean_track_term(title)
-    clean_artist = _clean_track_term(artist)
-    query = f"{clean_artist} {clean_title}".strip()
-    if not query:
-        return None
-    try:
-        async with session.get(
-            "https://api.deezer.com/search",
-            params={"q": query, "limit": 5},
-            timeout=aiohttp.ClientTimeout(total=8),
-        ) as resp:
-            if resp.status != 200:
-                return None
-            items = (await resp.json(content_type=None)).get("data") or []
-            if not items:
-                return None
-            title_fold = clean_title.casefold()
-            artist_fold = clean_artist.casefold()
-            for item in items:
-                item_title = _clean_track_term(item.get("title")).casefold()
-                item_artist = _clean_track_term((item.get("artist") or {}).get("name")).casefold()
-                if item_title == title_fold and (not artist_fold or item_artist == artist_fold):
-                    return item.get("preview")
-    except Exception:
-        logger.debug("Canonical preview lookup failed", exc_info=True)
-    return None
+    features = await fetch_deezer_audio_features(session, title=title, artist=artist)
+    return features.get("preview_url") if features else None
 
 
 
