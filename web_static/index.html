@@ -304,6 +304,14 @@
           </div>
         </div>
 
+        <div class="panel-customizer" id="panelCustomizer" hidden>
+          <div class="panel-customizer-header">
+            <div><strong>Customize analytics</strong><span>Choose which panels appear on this server view.</span></div>
+            <button class="icon-btn" id="closePanelCustomizer" type="button" aria-label="Close panel customization">×</button>
+          </div>
+          <div class="panel-customizer-list" id="panelCustomizerList"></div>
+          <button class="small-button" id="resetPanelsButton" type="button">Reset panels</button>
+        </div>
         <div class="stats-grid">
           <div class="card analytics-number"><span class="muted">Total members</span><strong id="anaMembers">—</strong><small>current server size</small></div>
           <div class="card analytics-number"><span class="muted">Total joins logged</span><strong id="anaTotalJoins">—</strong><small>all tracked time</small></div>
@@ -455,14 +463,6 @@
             <div class="health-row"><span>Playlist sync</span><strong id="healthSync">—</strong></div>
             <div class="health-row"><span>Sync queue</span><strong id="healthSyncQueue">—</strong></div>
           </div>
-        </div>
-        <div class="panel-customizer" id="panelCustomizer" hidden>
-          <div class="panel-customizer-header">
-            <div><strong>Customize analytics</strong><span>Choose which panels appear on this server view.</span></div>
-            <button class="icon-btn" id="closePanelCustomizer" type="button" aria-label="Close panel customization">×</button>
-          </div>
-          <div class="panel-customizer-list" id="panelCustomizerList"></div>
-          <button class="small-button" id="resetPanelsButton" type="button">Reset panels</button>
         </div>
       </section>
 
