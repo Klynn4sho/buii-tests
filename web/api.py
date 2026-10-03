@@ -249,6 +249,21 @@ def guild_music_leaderboard(guild_id):
     ]})
 
 
+@bp.route("/api/guilds/<guild_id>/music-log")
+@guild_access_required
+def guild_music_log(guild_id):
+    limit = request.args.get("limit", default=25, type=int)
+    limit = max(1, min(limit, 50))
+    rows = database._raw_get_music_log(int(guild_id), limit=limit)
+    return jsonify({"songs": [
+        {"id": r["id"], "song_number": r["song_number"], "title": r["title"],
+         "artist": r["artist"], "source": r["source"], "url": r["url"],
+         "requested_by": r["requested_by_name"], "created_at": r["created_at"].isoformat(),
+         "status": "added to playlist" if r["synced"] else "closed" if r["closed"] else "open"}
+        for r in rows
+    ]})
+
+
 # ======================================================================
 # Config (mirrors /setlog, /setalertrole, /setmodrole, /setprefix,
 # /setmusicchannel, /setmusicrole, /setmusiclock exactly)
