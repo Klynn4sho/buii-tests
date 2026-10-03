@@ -29,7 +29,7 @@ from core import database
 from core.config import RATING_WINDOW_HOURS
 from core.components import SimpleLayout, footer_line, notice
 from core.helpers import create_music_card, format_elapsed
-from core.music_utils import fetch_audio_features, fetch_lyrics, remove_from_spotify
+from core.music_utils import fetch_audio_features, fetch_canonical_preview, fetch_lyrics, remove_from_spotify
 
 
 def _track_text(title: str, artist: str, preview_url: str = None, url: str = None,
@@ -200,6 +200,15 @@ class PreviewButton(ui.Button):
             if session is None:
                 raise RuntimeError("HTTP session is unavailable")
 
+            canonical_preview_url = await fetch_canonical_preview(
+                session,
+                song.get("url") if song else None,
+                song.get("title") if song else None,
+                song.get("artist") if song else None,
+            )
+            if canonical_preview_url:
+                preview_url = canonical_preview_url
+
             async with session.get(preview_url) as response:
                 if response.status != 200:
                     raise RuntimeError(f"preview download returned HTTP {response.status}")
@@ -315,8 +324,8 @@ class AudioStatsButton(ui.Button):
             if not features:
                 await interaction.response.send_message(
                     view=notice(
-                        "ℹ️ Audio stats are only available for Spotify tracks "
-                        "when Spotify API access is configured."
+                        "ℹ️ No Spotify match or audio stats are available "
+                        "for this track."
                     ),
                     ephemeral=True,
                 )
