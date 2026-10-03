@@ -29,7 +29,7 @@ from core import database
 from core.config import RATING_WINDOW_HOURS
 from core.components import SimpleLayout, footer_line, notice
 from core.helpers import create_music_card, format_elapsed
-from core.music_utils import fetch_audio_features, fetch_canonical_preview, fetch_lyrics, remove_from_spotify
+from core.music_utils import fetch_canonical_preview, fetch_deezer_audio_features, fetch_lyrics, remove_from_spotify
 
 
 def _track_text(title: str, artist: str, preview_url: str = None, url: str = None,
@@ -315,7 +315,7 @@ class AudioStatsButton(ui.Button):
         try:
             song = await database.get_song(self.guild_id, self.song_id)
             session = getattr(interaction.client, "http_session", None)
-            features = await fetch_audio_features(
+            features = await fetch_deezer_audio_features(
                 session,
                 song.get("url") if song else None,
                 song.get("title") if song else None,
@@ -324,32 +324,27 @@ class AudioStatsButton(ui.Button):
             if not features:
                 await interaction.response.send_message(
                     view=notice(
-                        "ℹ️ No Spotify match or audio stats are available "
+                        "ℹ️ No Deezer match or audio stats are available "
                         "for this track."
                     ),
                     ephemeral=True,
                 )
                 return
 
-            key_names = ("C", "C-sharp", "D", "D-sharp", "E", "F", "F-sharp", "G", "G-sharp", "A", "A-sharp", "B")
-            key_index = features.get("key")
-            key = "Unknown"
-            if isinstance(key_index, int) and 0 <= key_index < len(key_names):
-                mode = "Major" if features.get("mode") == 1 else "Minor"
-                key = f"{key_names[key_index]} {mode}"
-
-            def percent(value):
-                return f"{float(value) * 100:.0f}%" if value is not None else "—"
+            tempo = features.get("tempo")
+            gain = features.get("loudness")
+            bpm_text = f"{float(tempo):.0f}" if tempo is not None else "—"
+            gain_text = f"{float(gain):.1f} dB" if gain is not None else "—"
+            genre = features.get("genre") or "Unknown"
 
             stats = (
-                f"## AUDIO FEATURES\n"
-                f"-# {song.get('title') or 'Unknown Title'} · {song.get('artist') or 'Unknown Artist'}\n\n"
-                f"**BPM**  ·  {float(features.get('tempo', 0)):.0f}\n"
-                f"**Key**  ·  {key}\n"
-                f"**Energy**  ·  {percent(features.get('energy'))}\n"
-                f"**Danceability**  ·  {percent(features.get('danceability'))}\n"
-                f"**Valence**  ·  {percent(features.get('valence'))}\n\n"
-                f"-# Spotify musical stats"
+                f"## AUDIO STATS\n"
+                f"-# {features.get('title') or song.get('title') or 'Unknown Title'} · "
+                f"{features.get('artist') or song.get('artist') or 'Unknown Artist'}\n\n"
+                f"**BPM**  ·  {bpm_text}\n"
+                f"**Gain**  ·  {gain_text}\n"
+                f"**Genre**  ·  {genre}\n\n"
+                f"-# Deezer track metadata"
             )
             await interaction.response.send_message(
                 view=SimpleLayout(stats),
