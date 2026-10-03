@@ -23,26 +23,27 @@ from discord import ui
 
 from core import database
 from core.config import RATING_WINDOW_HOURS, COLOR_DANGER
-from core.components import footer_line, notice
+from core.components import SimpleLayout, footer_line, notice
 from core.helpers import create_music_card, score_color, format_elapsed
-from core.music_utils import remove_from_spotify
+from core.music_utils import fetch_lyrics, remove_from_spotify
 
 
 def _track_text(title: str, artist: str, preview_url: str = None, url: str = None,
                  requester_name: str = None, ping_text: str = None) -> str:
-    """Builds the TextDisplay content shared by RatingView and
-    ClosedRatingView: an optional ping line (mentions still notify from
-    inside a TextDisplay, even though `content=` can't be combined with a
-    Components V2 view), the title/artist, and preview/source links."""
+    """Build the main song heading; attribution is rendered near the footer."""
+    title_line = f"## {title or 'Unknown Title'}"
+    if artist:
+        title_line += f"\n-# {artist}"
+    return title_line
+
+
+def _requester_text(requester_name: str = None, ping_text: str = None) -> str:
+    """Keep the notification mention and attribution together at the bottom."""
     lines = []
     if ping_text:
         lines.append(ping_text)
     if requester_name:
-        lines.append(footer_line(f"Requested by {requester_name}"))
-    title_line = f"## {title or 'Unknown Title'}"
-    if artist:
-        title_line += f"\n-# {artist}"
-    lines.append(title_line)
+        lines.append(f"Requested by {requester_name}")
     return "\n".join(lines)
 
 
@@ -138,6 +139,49 @@ class PreviewButton(ui.Button):
                 logger.debug("Non-fatal exception suppressed", exc_info=True)
 
 
+class LyricsButton(ui.Button):
+    def __init__(self, guild_id: int, song_id: int):
+        super().__init__(
+            label="♫ Lyrics",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"lyrics|{song_id}",
+        )
+        self.guild_id = guild_id
+        self.song_id = song_id
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            song = await database.get_song(self.guild_id, self.song_id)
+            if not song or not song.get("title") or not song.get("artist"):
+                await interaction.response.send_message(
+                    view=notice("❌ Lyrics are unavailable because this track has no artist metadata."),
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+            session = getattr(interaction.client, "http_session", None)
+            lyrics = await fetch_lyrics(session, song["title"], song["artist"]) if session else None
+            if not lyrics:
+                await interaction.followup.send(
+                    view=notice("❌ No lyrics were found for this track."),
+                    ephemeral=True,
+                )
+                return
+
+            excerpt = lyrics[:3500]
+            if len(lyrics) > len(excerpt):
+                excerpt += "\n…"
+            text = f"## {song['title']}\n-# {song['artist']}\n\n{excerpt}"
+            await interaction.followup.send(view=SimpleLayout(text), ephemeral=True)
+        except Exception:
+            logger.exception("[music] lyrics lookup failed")
+            if interaction.response.is_done():
+                await interaction.followup.send(view=notice("❌ Couldn't fetch lyrics right now."), ephemeral=True)
+            else:
+                await interaction.response.send_message(view=notice("❌ Couldn't fetch lyrics right now."), ephemeral=True)
+
+
 class RatingButton(ui.Button):
     def __init__(self, guild_id: int, score: int, song_id: int):
         # No `row=` here: RatingView groups these into two explicit
@@ -226,18 +270,25 @@ class RatingView(ui.LayoutView):
         if card_file is not None:
             items.append(ui.MediaGallery(discord.MediaGalleryItem(card_file)))
 
-        link_buttons = [PreviewButton(guild_id, song_id, disabled=preview_used)]
+        link_buttons = [
+            PreviewButton(guild_id, song_id, disabled=preview_used),
+            LyricsButton(guild_id, song_id),
+        ]
         if url:
             link_buttons.append(ui.Button(label="↗ Source", style=discord.ButtonStyle.link, url=url))
         items.append(ui.ActionRow(*link_buttons))
         items.append(ui.ActionRow(*(RatingButton(guild_id, i, song_id) for i in range(1, 6))))
         items.append(ui.ActionRow(*(RatingButton(guild_id, i, song_id) for i in range(6, 11))))
 
+        requester_text = _requester_text(requester_name, ping_text)
+        if requester_text:
+            items.append(ui.TextDisplay(requester_text))
+
         footer_text = vote_note or "Rate it using the buttons below"
         items.append(ui.TextDisplay(footer_line(f"ID: {song_number} • {footer_text}")))
 
-        color = discord.Color.from_str(score_color(avg)) if count > 0 else discord.Color.from_rgb(*accent_rgb)
-        self.container = ui.Container(*items, accent_color=color)
+        # Status is shown on the Pillow card; keep the container border neutral.
+        self.container = ui.Container(*items)
         self.add_item(self.container)
 
 
