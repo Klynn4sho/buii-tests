@@ -7,6 +7,9 @@ The renderer draws at 2x and downsamples at the end (same supersampling
 trick as create_music_card) so rounded corners, rings and text stay smooth.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 import asyncio
 import io
 import unicodedata
@@ -75,7 +78,7 @@ async def fetch_image(session, url):
                 data = await response.read()
                 return Image.open(io.BytesIO(data)).convert("RGBA")
     except Exception:
-        pass
+        logger.debug("Non-fatal exception suppressed", exc_info=True)
     return None
 
 

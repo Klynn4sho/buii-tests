@@ -13,6 +13,9 @@ graph picker use the brand color. Config confirmations and errors are
 plain, un-accented containers.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 import asyncio
 import io
 import random
@@ -84,7 +87,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                     name = getattr(item, "name", str(item))
                     badges.append(str(name).replace("_", " ").title())
         except Exception:
-            pass
+            logger.debug("Non-fatal exception suppressed", exc_info=True)
 
         await database.async_upsert_member_snapshot(
             member.guild.id,
@@ -115,13 +118,13 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                             try:
                                 await self.snapshot_member(member)
                             except (discord.HTTPException, asyncio.TimeoutError) as error:
-                                print(f"[growth] snapshot failed for {member.id}: {error!r}")
+                                logger.exception("[growth] operation failed")
 
                     await asyncio.gather(*(save_one(member) for member in members))
             except asyncio.CancelledError:
                 raise
             except Exception as error:
-                print(f"[growth] member snapshot refresh failed: {error!r}")
+                logger.exception("[growth] operation failed")
             await asyncio.sleep(random.uniform(13 * 3600, 24 * 3600))
 
     # ------------------------------------------------------------------
@@ -140,7 +143,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                         new_view = await DashboardView.build(guild)
                         await message.edit(view=new_view, attachments=[new_view.file])
                     except Exception:
-                        pass
+                        logger.debug("Non-fatal exception suppressed", exc_info=True)
 
     @panel_refresh_loop.before_loop
     async def before_panel_refresh_loop(self):
@@ -278,7 +281,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                 allowed_mentions=discord.AllowedMentions(users=True, roles=True),
             )
         except discord.HTTPException as e:
-            print(f"[growth] couldn't post join alert in guild {guild.id}: {e!r}")
+            logger.exception("[growth] operation failed")
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
@@ -526,7 +529,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                     old_msg = await old_channel.fetch_message(old_msg_id)
                     await old_msg.delete()
                 except Exception:
-                    pass
+                    logger.debug("Non-fatal exception suppressed", exc_info=True)
 
         view = await DashboardView.build(ctx.guild)
         panel_message = await ctx.send(view=view, file=view.file)

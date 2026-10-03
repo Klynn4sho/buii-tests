@@ -7,6 +7,9 @@ explanatory content inside a Container. They are invite content, so they
 keep the brand accent color (see core/components.py for the accent rule).
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 import csv
 import io
 
@@ -28,7 +31,7 @@ async def _notify_error(interaction: discord.Interaction, text: str):
         else:
             await interaction.response.send_message(view=notice(text), ephemeral=True)
     except Exception:
-        pass
+        logger.debug("Non-fatal exception suppressed", exc_info=True)
 
 
 class JoinValueButton(ui.DynamicItem[ui.Button], template=r"join_value\|(?P<kind>user|inviter|code)\|(?P<value>[A-Za-z0-9_-]+)"): 
@@ -262,7 +265,7 @@ class DashboardView(ui.LayoutView):
             new_view = await DashboardView.build(interaction.guild)
             await interaction.edit_original_response(view=new_view, attachments=[new_view.file])
         except Exception as e:
-            print(f"[growth] dashboard refresh failed: {e!r}")
+            logger.exception("[growth] operation failed")
             await _notify_error(interaction, "❌ Couldn't refresh the dashboard — try again in a moment.")
 
     async def on_export(self, interaction: discord.Interaction):
@@ -295,7 +298,7 @@ class DashboardView(ui.LayoutView):
                 ephemeral=True,
             )
         except Exception as e:
-            print(f"[growth] CSV export failed: {e!r}")
+            logger.exception("[growth] operation failed")
             await _notify_error(interaction, "❌ Couldn't build the CSV export — try again in a moment.")
 
 
@@ -344,5 +347,5 @@ class GraphView(ui.LayoutView):
             # new image, not just new text.
             await interaction.edit_original_response(view=new_view, attachments=[new_view.file])
         except Exception as e:
-            print(f"[growth] graph range change failed: {e!r}")
+            logger.exception("[growth] operation failed")
             await _notify_error(interaction, "❌ Couldn't update the growth chart — try again in a moment.")

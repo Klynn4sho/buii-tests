@@ -39,7 +39,6 @@ def build_authorize_url(state: str) -> str:
         "response_type": "code",
         "scope": SCOPES,
         "state": state,
-        "prompt": "none",
     }
     return f"{AUTHORIZE_URL}?{urlencode(params)}"
 

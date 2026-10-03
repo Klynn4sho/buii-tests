@@ -1,3 +1,7 @@
+## Runtime
+
+Buii targets **Python 3.10+**. Install the pinned dependencies with `pip install -r requirements.txt`.
+
 # Buii — cogs edition
 
 The original single-file bot, split into a `cogs/`-based project, then
@@ -173,3 +177,30 @@ python main.py
 4. Wrap its responses in containers via `core/components.py` (use `notice()`
    for short replies), and pass an accent color only if the content is
    invite- or song-related.
+
+## Security / production hardening
+
+The dashboard build includes the following production safeguards:
+
+- Dashboard guild permissions are rechecked against the live Discord member on every protected guild API request; the OAuth login snapshot is not treated as an authorization grant.
+- Dashboard role/channel IDs are validated against the live guild before they are written to PostgreSQL, and configuration updates validate all fields before applying any changes.
+- API/database strings are rendered with DOM APIs or escaped before controlled HTML insertion; the dashboard no longer uses inline event handlers.
+- The frontend JavaScript is served as `web_static/app.js` with a strict `script-src 'self'` Content Security Policy.
+- Standard browser security headers are added by the Flask app.
+- Development-only `BYPASS_USER_ID` is ignored automatically when `APP_ENV=production`.
+- OAuth no longer requests Discord's silent `prompt=none` mode, so first-time login can show the normal authorization screen.
+- The default web server is Waitress rather than Flask's development server. Set `WEB_DEV_SERVER=1` only for local development.
+- Dependencies are pinned in `requirements.txt` for reproducible installs.
+- Recent-join dashboard queries apply their limit in SQL instead of loading the complete history into Python.
+- Database connection-pool infrastructure is separated into `core/db/pool.py`, while `core/database.py` remains the stable domain/query facade.
+- Runtime failures use Python logging rather than silent `except Exception: pass` blocks.
+
+### Tests
+
+Run the dependency-free hardening checks with:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The test suite checks the dashboard CSP assumptions, absence of inline handlers, XSS-safe rendering paths, live authorization/config validation wiring, SQL limiting, pinned dependencies, Python syntax, and JavaScript syntax.

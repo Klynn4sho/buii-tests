@@ -1,54 +1,49 @@
 """
-Postgres access layer, shared by every cog.
+Postgres domain/query layer, shared by every cog.
 
-Both the invite-tracking tables (joins/leaves/config) and the music tables
-(songs/ratings) live in the same database and share this one connection
-pool, so all of it stays in a single module rather than being split by
-feature — cogs import whichever functions they need from here.
+Invite-tracking and music SQL intentionally share one public facade so the
+existing cogs stay simple. Connection-pool lifecycle now lives separately in
+core/db/pool.py, which keeps infrastructure concerns out of this large domain
+module without breaking the existing database API.
 """
 
 import asyncio
 import json
 from datetime import datetime, timezone, timedelta
 
-import psycopg2
-from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 
-from core.config import DB_CONNECTION_STRING, DEFAULT_PREFIX, DB_POOL_MIN, DB_POOL_MAX
+from core.config import DEFAULT_PREFIX
 
-# --- Connection pool ---
+# Connection infrastructure lives in core.db.pool; these aliases preserve the
+# existing core.database API used throughout the bot.
+from core.db import pool as _db_pool
+
 db_pool = None
 
 
 def init_db_pool():
     global db_pool
-    if db_pool:
-        return
-    if not DB_CONNECTION_STRING:
-        raise RuntimeError("DB_URL environment variable is not set.")
-    try:
-        db_pool = psycopg2.pool.SimpleConnectionPool(DB_POOL_MIN, DB_POOL_MAX, DB_CONNECTION_STRING)
-    except psycopg2.Error as exc:
-        raise RuntimeError("Could not connect to PostgreSQL. Check DB_URL and database availability.") from exc
+    _db_pool.init_db_pool()
+    db_pool = _db_pool.db_pool
 
 
 def get_db_conn():
-    # Self-initializing: the Flask dashboard thread (web/) can start serving
-    # requests before main.py's setup_hook() has called init_db_pool(), so
-    # whichever caller asks first — the bot or a dashboard request — safely
-    # creates the pool instead of hitting a NoneType crash.
-    if db_pool is None:
-        init_db_pool()
-    return db_pool.getconn()
+    global db_pool
+    conn = _db_pool.get_db_conn()
+    db_pool = _db_pool.db_pool
+    return conn
 
 
 def release_db_conn(conn):
-    if db_pool is None or conn is None:
-        return
-    # Broken connections must not be returned to the pool; otherwise one
-    # transient network failure can poison every later database operation.
-    db_pool.putconn(conn, close=bool(conn.closed))
+    _db_pool.release_db_conn(conn)
+
+
+def close_db_pool():
+    global db_pool
+    _db_pool.close_db_pool()
+    db_pool = None
+
 
 
 # In-memory prefix cache so async_get_prefix doesn't hit the DB on every
@@ -57,21 +52,7 @@ guild_prefix_cache = {}
 
 
 def _raw_check_db_health():
-    conn = get_db_conn()
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1;")
-        cursor.fetchone()
-        cursor.close()
-        return True
-    except Exception:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        return False
-    finally:
-        release_db_conn(conn)
+    return _db_pool.check_db_health()
 
 
 async def async_check_db_health():
@@ -475,7 +456,7 @@ def _raw_set_guild_log_channel(guild_id, channel_id):
             INSERT INTO config (guild_id, log_channel_id)
             VALUES (%s, %s)
             ON CONFLICT (guild_id) DO UPDATE SET log_channel_id = EXCLUDED.log_channel_id;
-        ''', (str(guild_id), str(channel_id)))
+        ''', (str(guild_id), str(channel_id) if channel_id is not None else None))
         conn.commit()
         cursor.close()
     finally:
@@ -755,20 +736,25 @@ async def async_get_growth_analytics(guild_id):
     return await asyncio.to_thread(_raw_get_growth_analytics, guild_id)
 
 
-def _raw_get_joins_in_range(guild_id, start_dt=None):
+def _raw_get_joins_in_range(guild_id, start_dt=None, limit=None, newest_first=False):
     conn = get_db_conn()
     try:
         cursor = conn.cursor()
+        order = "DESC" if newest_first else "ASC"
+        params = [str(guild_id)]
+        where = "guild_id = %s"
         if start_dt:
-            cursor.execute('''
-                SELECT user_id, user_name, inviter_name, invite_code, join_date, account_age_days
-                FROM joins WHERE guild_id = %s AND join_date >= %s ORDER BY join_date ASC;
-            ''', (str(guild_id), start_dt.strftime('%Y-%m-%d %H:%M:%S')))
-        else:
-            cursor.execute('''
-                SELECT user_id, user_name, inviter_name, invite_code, join_date, account_age_days
-                FROM joins WHERE guild_id = %s ORDER BY join_date ASC;
-            ''', (str(guild_id),))
+            where += " AND join_date >= %s"
+            params.append(start_dt.strftime('%Y-%m-%d %H:%M:%S'))
+        query = f"""
+            SELECT user_id, user_name, inviter_name, invite_code, join_date, account_age_days
+            FROM joins WHERE {where} ORDER BY join_date {order}
+        """
+        if limit is not None:
+            query += " LIMIT %s"
+            params.append(max(1, min(int(limit), 10000)))
+        query += ";"
+        cursor.execute(query, tuple(params))
         rows = cursor.fetchall()
         cursor.close()
         return rows
@@ -776,8 +762,8 @@ def _raw_get_joins_in_range(guild_id, start_dt=None):
         release_db_conn(conn)
 
 
-async def async_get_joins_in_range(guild_id, start_dt=None):
-    return await asyncio.to_thread(_raw_get_joins_in_range, guild_id, start_dt)
+async def async_get_joins_in_range(guild_id, start_dt=None, limit=None, newest_first=False):
+    return await asyncio.to_thread(_raw_get_joins_in_range, guild_id, start_dt, limit, newest_first)
 
 
 def _raw_get_daily_join_counts(guild_id, days=30):

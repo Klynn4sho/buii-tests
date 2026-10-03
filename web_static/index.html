@@ -52,7 +52,7 @@
             <div><strong>Recent joins</strong><small id="notificationCount">—</small></div>
           </div>
           <div class="notification-list" id="notificationList"></div>
-          <button class="view-all-button" onclick="showPage('stats'); closeMenus();">View activity →</button>
+          <button class="view-all-button" id="viewActivityButton">View activity →</button>
         </div>
       </div>
 
@@ -136,7 +136,7 @@
           <div class="card wide">
             <div class="card-title">
               <h2>Recent joins</h2>
-              <button class="small-button" onclick="loadRecentJoins(currentGuildId)">Refresh</button>
+              <button class="small-button" id="refreshRecentJoinsButton">Refresh</button>
             </div>
             <div class="activity" id="activityList">
               <div class="muted" style="padding:8px 0">Loading…</div>
@@ -160,8 +160,8 @@
           </div>
         </div>
         <div class="toolbar">
-          <div class="search"><span>⌕</span><input id="commandSearch" type="text" placeholder="Search commands..." oninput="filterCommands()"></div>
-          <select id="commandCategory" onchange="filterCommands()">
+          <div class="search"><span>⌕</span><input id="commandSearch" type="text" placeholder="Search commands..."></div>
+          <select id="commandCategory">
             <option value="all">All categories</option>
             <option value="music">Music</option>
             <option value="growth">Invites &amp; Growth</option>
@@ -190,7 +190,7 @@
               <p>The prefix used for text commands, e.g. <code>b,leaderboard</code>. Slash commands always work regardless.</p>
               <div class="config-field">
                 <input type="text" id="cfgPrefix" maxlength="5" placeholder="b,">
-                <button class="small-button" onclick="saveConfigField('prefix', document.getElementById('cfgPrefix').value)">Save</button>
+                <button class="small-button" data-save-field="prefix">Save</button>
               </div>
             </div>
           </div>
@@ -202,7 +202,7 @@
               <p>Where join-risk alerts get posted. Falls back to a channel literally named #welcome if unset.</p>
               <div class="config-field">
                 <select id="cfgLogChannel"><option value="">— none —</option></select>
-                <button class="small-button" onclick="saveConfigField('log_channel_id', valueOrNull('cfgLogChannel'))">Save</button>
+                <button class="small-button" data-save-field="log_channel_id">Save</button>
               </div>
             </div>
           </div>
@@ -214,7 +214,7 @@
               <p>Pinged when an account under 7 days old joins.</p>
               <div class="config-field">
                 <select id="cfgAlertRole"><option value="">— none —</option></select>
-                <button class="small-button" onclick="saveConfigField('alert_role_id', valueOrNull('cfgAlertRole'))">Save</button>
+                <button class="small-button" data-save-field="alert_role_id">Save</button>
               </div>
             </div>
           </div>
@@ -226,7 +226,7 @@
               <p>Can use config commands without needing full Manage Server.</p>
               <div class="config-field">
                 <select id="cfgModRole"><option value="">— none —</option></select>
-                <button class="small-button" onclick="saveConfigField('mod_role_id', valueOrNull('cfgModRole'))">Save</button>
+                <button class="small-button" data-save-field="mod_role_id">Save</button>
               </div>
             </div>
           </div>
@@ -238,7 +238,7 @@
               <p>Restricts music-link detection to one channel. Leave unset to allow any channel.</p>
               <div class="config-field">
                 <select id="cfgMusicChannel"><option value="">— any channel —</option></select>
-                <button class="small-button" onclick="saveConfigField('music_channel_id', valueOrNull('cfgMusicChannel'))">Save</button>
+                <button class="small-button" data-save-field="music_channel_id">Save</button>
               </div>
             </div>
           </div>
@@ -250,7 +250,7 @@
               <p>Pinged whenever a new song is posted for rating.</p>
               <div class="config-field">
                 <select id="cfgMusicRole"><option value="">— none —</option></select>
-                <button class="small-button" onclick="saveConfigField('music_role_id', valueOrNull('cfgMusicRole'))">Save</button>
+                <button class="small-button" data-save-field="music_role_id">Save</button>
               </div>
             </div>
           </div>
@@ -262,7 +262,7 @@
               <p>Seconds the music channel locks after a song is posted. 0 disables the lock.</p>
               <div class="config-field">
                 <input type="number" id="cfgLockSeconds" min="0" placeholder="0">
-                <button class="small-button" onclick="saveConfigField('music_lock_seconds', Number(document.getElementById('cfgLockSeconds').value || 0))">Save</button>
+                <button class="small-button" data-save-field="music_lock_seconds">Save</button>
               </div>
             </div>
           </div>
@@ -277,7 +277,7 @@
             <h1>Statistics</h1>
             <p>Real numbers from BUII's own database and live connection — nothing here is simulated.</p>
           </div>
-          <select class="period-select" id="growthPeriod" onchange="loadGrowthChart(currentGuildId)">
+          <select class="period-select" id="growthPeriod">
             <option value="30">Last 30 days</option>
             <option value="7">Last 7 days</option>
             <option value="90">Last 90 days</option>
@@ -338,400 +338,6 @@
   <div class="toast" id="toast"></div>
 </div>
 
-<script>
-/* =====================================================
-   STATE
-   ===================================================== */
-let currentUser = null;
-let currentGuilds = [];
-let currentGuildId = localStorage.getItem("buii-last-guild") || null;
-let allCommands = [];
-
-function initials(name) {
-  return (name || "?").split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
-}
-function valueOrNull(id) {
-  const v = document.getElementById(id).value;
-  return v === "" ? null : v;
-}
-function fmtNum(n) {
-  if (n === null || n === undefined) return "—";
-  return Number(n).toLocaleString();
-}
-
-/* =====================================================
-   BOOT: check login, then load everything
-   ===================================================== */
-async function boot() {
-  try {
-    const res = await fetch("/api/me");
-    if (res.status === 401) { showLoginGate(); return; }
-    if (!res.ok) throw new Error("me() failed: " + res.status);
-    const data = await res.json();
-    currentUser = data.user;
-    currentGuilds = data.guilds || [];
-    showApp();
-  } catch (e) {
-    showLoginGate("Couldn't reach the dashboard API. Is the bot running?");
-  }
-}
-
-function showLoginGate(errorText) {
-  document.getElementById("app").style.display = "none";
-  document.getElementById("loginGate").style.display = "flex";
-  if (errorText) {
-    const el = document.getElementById("loginError");
-    el.textContent = errorText;
-    el.style.display = "block";
-  }
-  const params = new URLSearchParams(location.search);
-  if (params.get("login_error")) {
-    const el = document.getElementById("loginError");
-    el.textContent = "Login failed: " + params.get("login_error");
-    el.style.display = "block";
-  }
-}
-
-function showApp() {
-  document.getElementById("loginGate").style.display = "none";
-  document.getElementById("app").style.display = "";
-
-  document.getElementById("profileName").textContent = currentUser.username;
-  document.getElementById("profileNameLarge").textContent = currentUser.username;
-  const av = currentUser.avatar_url;
-  for (const id of ["profileAvatar", "profileAvatarLarge"]) {
-    const el = document.getElementById(id);
-    if (av) { el.style.backgroundImage = `url(${av})`; el.style.backgroundSize = "cover"; el.textContent = ""; }
-    else { el.textContent = initials(currentUser.username); }
-  }
-
-  renderServerList();
-  loadCommands();
-
-  if (!currentGuilds.find(g => g.id === currentGuildId)) {
-    currentGuildId = currentGuilds.length ? currentGuilds[0].id : null;
-  }
-  if (currentGuildId) selectServer(currentGuildId);
-  else {
-    document.getElementById("serverList").innerHTML =
-      '<div class="muted" style="padding:12px">No manageable servers found — you need Manage Server permission in a server BUII is also in.</div>';
-  }
-
-  showPage(location.hash.replace("#", "") || "home");
-}
-
-function renderServerList() {
-  const list = document.getElementById("serverList");
-  if (!currentGuilds.length) {
-    list.innerHTML = '<div class="muted" style="padding:12px">No servers yet.</div>';
-    return;
-  }
-  list.innerHTML = currentGuilds.map(g => `
-    <div class="server${g.id === currentGuildId ? " active" : ""}" data-guild="${g.id}" onclick="selectServer('${g.id}')">
-      <div class="server-icon" ${g.icon_url ? `style="background-image:url(${g.icon_url});background-size:cover"` : ""}>${g.icon_url ? "" : initials(g.name)}</div>
-      <div><b>${g.name}</b></div>
-    </div>
-  `).join("");
-}
-
-function selectServer(id) {
-  currentGuildId = id;
-  localStorage.setItem("buii-last-guild", id);
-  document.querySelectorAll(".server").forEach(el => el.classList.toggle("active", el.dataset.guild === id));
-  const g = currentGuilds.find(g => g.id === id);
-  if (g) {
-    document.getElementById("heroServer").textContent = g.name;
-    const icon = document.getElementById("heroServerIcon");
-    if (g.icon_url) { icon.style.backgroundImage = `url(${g.icon_url})`; icon.style.backgroundSize = "cover"; icon.textContent = ""; }
-    else { icon.textContent = initials(g.name); }
-  }
-  loadOverview(id);
-  loadGrowthChart(id);
-  loadLeaderboard(id);
-  loadMusicLeaderboard(id);
-  loadConfig(id);
-  loadRecentJoins(id);
-  toast((g ? g.name : "Server") + " selected");
-}
-
-/* =====================================================
-   DATA LOADERS
-   ===================================================== */
-async function loadOverview(guildId) {
-  if (!guildId) return;
-  const res = await fetch(`/api/guilds/${guildId}/overview`);
-  if (!res.ok) return;
-  const d = await res.json();
-  document.getElementById("statMembers").textContent = fmtNum(d.guild && d.guild.member_count);
-  document.getElementById("statJoins24h").textContent = fmtNum(d.joins_24h);
-  document.getElementById("statJoinsTotal").textContent = fmtNum(d.total_joins) + " all-time";
-  document.getElementById("statRisk").textContent = fmtNum(d.extreme_risk_count);
-  document.getElementById("statLatency").textContent = d.bot_latency_ms !== null ? d.bot_latency_ms + "ms" : "—";
-
-  document.getElementById("anaMembers").textContent = fmtNum(d.guild && d.guild.member_count);
-  document.getElementById("anaTotalJoins").textContent = fmtNum(d.total_joins);
-  document.getElementById("anaJoins24h").textContent = fmtNum(d.joins_24h);
-  document.getElementById("anaRisk").textContent = fmtNum(d.extreme_risk_count);
-  document.getElementById("healthStatus").textContent = "Connected";
-  document.getElementById("healthTrend").textContent = "Operational";
-  document.getElementById("healthLatency").textContent = d.bot_latency_ms !== null ? d.bot_latency_ms + "ms" : "—";
-  document.getElementById("healthTopCode").textContent = (d.top_invite_codes && d.top_invite_codes[0]) ? `${d.top_invite_codes[0].code} (${d.top_invite_codes[0].uses})` : "—";
-}
-
-async function loadGrowthChart(guildId) {
-  if (!guildId) return;
-  const days = document.getElementById("growthPeriod").value || 30;
-  const res = await fetch(`/api/guilds/${guildId}/growth?days=${days}`);
-  if (!res.ok) return;
-  const d = await res.json();
-  const series = d.days || [];
-  const max = Math.max(1, ...series.map(x => x.joins));
-  const total = series.reduce((a, x) => a + x.joins, 0);
-  document.getElementById("growthTotal").textContent = "+" + fmtNum(total);
-  document.getElementById("growthSubtitle").textContent = `Last ${days} days`;
-  document.getElementById("growthChart").innerHTML = series.map(x =>
-    `<span style="height:${Math.max(4, Math.round(x.joins / max * 100))}%" title="${x.date}: ${x.joins} joins"></span>`
-  ).join("");
-  const labels = document.getElementById("growthLabels");
-  if (series.length) {
-    const fmt = s => new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    labels.innerHTML = `<span>${fmt(series[0].date)}</span><span>${fmt(series[Math.floor(series.length / 2)].date)}</span><span>${fmt(series[series.length - 1].date)}</span>`;
-  }
-}
-
-function rankingRows(items, labelKey, valueKey, formatValue) {
-  const max = Math.max(1, ...items.map(x => x[valueKey]));
-  return items.slice(0, 8).map((x, i) => `
-    <div class="ranking-row">
-      <span>${String(i + 1).padStart(2, "0")}</span>
-      <strong>${x[labelKey]}</strong>
-      <div class="ranking-bar"><i style="width:${Math.round(x[valueKey] / max * 100)}%"></i></div>
-      <b>${formatValue ? formatValue(x[valueKey]) : fmtNum(x[valueKey])}</b>
-    </div>
-  `).join("");
-}
-
-async function loadLeaderboard(guildId) {
-  if (!guildId) return;
-  const res = await fetch(`/api/guilds/${guildId}/leaderboard`);
-  if (!res.ok) return;
-  const d = await res.json();
-  const rows = d.leaderboard || [];
-  const html = rows.length ? rankingRows(rows, "inviter", "joins") : '<div class="muted" style="padding:8px 0">No tracked invites yet.</div>';
-  document.getElementById("homeLeaderboard").innerHTML = html;
-  document.getElementById("statsLeaderboard").innerHTML = html;
-}
-
-async function loadMusicLeaderboard(guildId) {
-  if (!guildId) return;
-  const res = await fetch(`/api/guilds/${guildId}/music-leaderboard`);
-  if (!res.ok) return;
-  const d = await res.json();
-  const rows = (d.songs || []).map(s => ({ label: s.title + (s.artist ? " — " + s.artist : ""), avg_score: s.avg_score }));
-  document.getElementById("musicLeaderboard").innerHTML = rows.length
-    ? rankingRows(rows, "label", "avg_score", v => v.toFixed(1) + "/10")
-    : '<div class="muted" style="padding:8px 0">No rated songs with 2+ votes yet.</div>';
-}
-
-async function loadRecentJoins(guildId) {
-  if (!guildId) return;
-  const res = await fetch(`/api/guilds/${guildId}/recent-joins`);
-  if (!res.ok) return;
-  const d = await res.json();
-  const rows = d.joins || [];
-  document.getElementById("notificationCount").textContent = rows.length ? `${rows.length} recent` : "No recent joins";
-  document.getElementById("notificationDot").classList.toggle("show", rows.length > 0);
-  const icon = "✦";
-  const listHtml = rows.length ? rows.map(j => `
-    <div class="notification" data-notification>
-      <div class="notification-icon">${icon}</div>
-      <div class="notification-content"><strong>${j.user_name}</strong><p>Invited by ${j.inviter_name}</p><span>${j.join_date}</span></div>
-    </div>`).join("") : '<div class="muted" style="padding:12px">No joins recorded yet.</div>';
-  document.getElementById("notificationList").innerHTML = listHtml;
-  document.getElementById("activityList").innerHTML = rows.length ? rows.map(j => `
-    <div class="activity-row">
-      <div class="activity-icon">${icon}</div>
-      <div><strong>${j.user_name}</strong><small>Invited by ${j.inviter_name} · code ${j.invite_code}</small></div>
-      <span class="time">${j.join_date}</span>
-    </div>`).join("") : '<div class="muted" style="padding:8px 0">No joins recorded yet.</div>';
-}
-
-async function loadConfig(guildId) {
-  if (!guildId) return;
-  const res = await fetch(`/api/guilds/${guildId}/config`);
-  if (!res.ok) return;
-  const d = await res.json();
-
-  document.getElementById("cfgPrefix").value = d.prefix || "";
-
-  const fillSelect = (id, options, current) => {
-    const sel = document.getElementById(id);
-    const placeholder = sel.options[0];
-    sel.innerHTML = "";
-    sel.appendChild(placeholder);
-    options.forEach(o => {
-      const opt = document.createElement("option");
-      opt.value = o.id; opt.textContent = o.name;
-      if (current && current.id === o.id) opt.selected = true;
-      sel.appendChild(opt);
-    });
-  };
-
-  fillSelect("cfgLogChannel", d.channels || [], d.log_channel);
-  fillSelect("cfgMusicChannel", d.channels || [], d.music_channel);
-  fillSelect("cfgAlertRole", d.roles || [], d.alert_role);
-  fillSelect("cfgModRole", d.roles || [], d.mod_role);
-  fillSelect("cfgMusicRole", d.roles || [], d.music_role);
-  document.getElementById("cfgLockSeconds").value = d.music_lock_seconds || 0;
-
-  document.getElementById("cfgLogStatus").textContent = d.log_channel ? "#" + d.log_channel.name : "Not set (falls back to #welcome)";
-  document.getElementById("cfgAlertStatus").textContent = d.alert_role ? d.alert_role.name : "Not set";
-  document.getElementById("cfgModStatus").textContent = d.mod_role ? d.mod_role.name : "Not set";
-  document.getElementById("cfgMusicChanStatus").textContent = d.music_channel ? "#" + d.music_channel.name : "Any channel";
-  document.getElementById("cfgMusicRoleStatus").textContent = d.music_role ? d.music_role.name : "Not set";
-  document.getElementById("cfgLockStatus").textContent = d.music_lock_seconds ? d.music_lock_seconds + "s lock" : "Disabled";
-}
-
-async function saveConfigField(field, value) {
-  if (!currentGuildId) return;
-  const res = await fetch(`/api/guilds/${currentGuildId}/config`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ [field]: value }),
-  });
-  if (res.ok) {
-    toast("Saved");
-    loadConfig(currentGuildId);
-  } else {
-    const d = await res.json().catch(() => ({}));
-    toast(d.error || "Save failed");
-  }
-}
-
-async function loadCommands() {
-  const res = await fetch("/api/commands");
-  if (!res.ok) return;
-  const d = await res.json();
-  allCommands = d.commands || [];
-  renderCommands(allCommands);
-}
-
-function renderCommands(commands) {
-  const symbol = { music: "♪", growth: "↗", staff: "◈", admin: "⚙" };
-  document.getElementById("commandList").innerHTML = commands.map(c => `
-    <div class="command-card" data-name="${c.name}" data-category="${c.category}">
-      <div class="command-main">
-        <div class="command-symbol">${symbol[c.category] || "?"}</div>
-        <div><h3>/${c.name}</h3><p>${c.description}</p><span class="command-category">${c.category}</span></div>
-      </div>
-    </div>
-  `).join("");
-}
-
-function filterCommands() {
-  const search = document.getElementById("commandSearch").value.toLowerCase();
-  const category = document.getElementById("commandCategory").value;
-  document.querySelectorAll(".command-card").forEach(card => {
-    const matches = card.dataset.name.toLowerCase().includes(search) && (category === "all" || card.dataset.category === category);
-    card.style.display = matches ? "flex" : "none";
-  });
-}
-
-/* =====================================================
-   PAGE NAVIGATION
-   ===================================================== */
-const pages = ["home", "commands", "config", "stats"];
-function showPage(page) {
-  if (!pages.includes(page)) page = "home";
-  document.querySelectorAll(".page").forEach(s => s.classList.remove("active-page"));
-  const target = document.getElementById("page-" + page);
-  if (target) target.classList.add("active-page");
-  document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.page === page));
-  document.querySelectorAll(".mobile-nav-item").forEach(b => b.classList.toggle("active", b.dataset.page === page));
-  history.replaceState(null, "", "#" + page);
-  window.scrollTo({ top: 0, behavior: "smooth" });
-}
-document.querySelectorAll("[data-page]").forEach(btn => btn.addEventListener("click", () => { showPage(btn.dataset.page); closeMenus(); }));
-
-/* =====================================================
-   TOAST
-   ===================================================== */
-function toast(message) {
-  const el = document.getElementById("toast");
-  el.textContent = message;
-  el.classList.add("show");
-  clearTimeout(window.toastTimer);
-  window.toastTimer = setTimeout(() => el.classList.remove("show"), 1800);
-}
-
-/* =====================================================
-   MENUS
-   ===================================================== */
-const profileBtn = document.getElementById("profileBtn");
-const profileMenu = document.getElementById("profileMenu");
-const notificationBtn = document.getElementById("notificationBtn");
-const notificationMenu = document.getElementById("notificationsMenu");
-const themeMenu = document.getElementById("themeMenu");
-
-profileBtn.addEventListener("click", e => {
-  e.stopPropagation();
-  const open = profileMenu.classList.toggle("open");
-  profileBtn.setAttribute("aria-expanded", open);
-  if (open) { notificationMenu.classList.remove("open"); notificationBtn.setAttribute("aria-expanded", "false"); }
-});
-notificationBtn.addEventListener("click", e => {
-  e.stopPropagation();
-  const open = notificationMenu.classList.toggle("open");
-  notificationBtn.setAttribute("aria-expanded", open);
-  if (open) { profileMenu.classList.remove("open"); profileBtn.setAttribute("aria-expanded", "false"); }
-});
-function closeMenus() {
-  profileMenu.classList.remove("open");
-  notificationMenu.classList.remove("open");
-  themeMenu.classList.remove("open");
-  profileBtn.setAttribute("aria-expanded", "false");
-  notificationBtn.setAttribute("aria-expanded", "false");
-}
-document.addEventListener("click", e => {
-  if (!e.target.closest(".menu-wrapper") && !e.target.closest("#themeMenu") && e.target.id !== "themeBtn") closeMenus();
-});
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeMenus(); });
-
-/* =====================================================
-   THEMES (unchanged from the original template)
-   ===================================================== */
-const themes = [
-  ["default", "AMOLED", "#ffffff"], ["midnight", "Midnight", "#8b7cff"], ["ocean", "Ocean", "#087f91"],
-  ["lavender", "Lavender", "#8254d6"], ["sunset", "Sunset", "#e64c35"], ["graphite", "Graphite", "#e9eaec"],
-  ["forest", "Forest Night", "#64d58d"], ["paper", "Paper + Orange", "#ff5b22"], ["rose", "Rose", "#e85d8b"],
-  ["cyber", "Cyber", "#35e6ff"], ["cherry", "Cherry", "#ff5470"], ["sapphire", "Sapphire", "#4d9cff"],
-  ["matcha", "Matcha", "#6c9d45"], ["mono", "Mono", "#111111"],
-];
-const root = document.documentElement;
-const themeOptions = document.getElementById("themeOptions");
-themes.forEach(([id, name, color]) => {
-  const button = document.createElement("button");
-  button.className = "theme-option";
-  button.dataset.theme = id;
-  button.innerHTML = `<span class="swatch" style="--swatch:${color}"></span><span>${name}</span>`;
-  button.addEventListener("click", () => { applyTheme(id); themeMenu.classList.remove("open"); toast(name + " theme applied"); });
-  themeOptions.appendChild(button);
-});
-function applyTheme(theme) {
-  if (!theme || theme === "default") root.removeAttribute("data-theme");
-  else root.dataset.theme = theme;
-  localStorage.setItem("buii-theme", theme || "default");
-  document.querySelectorAll(".theme-option").forEach(o => o.classList.toggle("active", o.dataset.theme === (theme || "default")));
-}
-applyTheme(localStorage.getItem("buii-theme") || "default");
-document.getElementById("themeBtn").addEventListener("click", e => {
-  e.stopPropagation();
-  themeMenu.classList.toggle("open");
-  profileMenu.classList.remove("open");
-  notificationMenu.classList.remove("open");
-});
-
-boot();
-</script>
+<script src="app.js" defer></script>
 </body>
 </html>

@@ -13,6 +13,8 @@ the dashboard can never drift out of sync with each other.
 """
 
 import functools
+import logging
+import re
 import secrets
 
 import requests
@@ -24,6 +26,29 @@ from web import bridge, oauth
 from web.commands_manifest import COMMANDS, CATEGORY_LABELS
 
 bp = Blueprint("api", __name__)
+logger = logging.getLogger(__name__)
+SNOWFLAKE_RE = re.compile(r"^[0-9]{17,20}$")
+
+
+def _parse_optional_snowflake(value, field_name):
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not SNOWFLAKE_RE.fullmatch(text):
+        raise ValueError(f"{field_name} must be a valid Discord ID or null.")
+    return int(text)
+
+
+def _parse_lock_seconds(value):
+    if value is None or value == "":
+        return None
+    try:
+        value = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("music_lock_seconds must be a whole number.") from exc
+    if not 0 <= value <= 86400:
+        raise ValueError("music_lock_seconds must be between 0 and 86400 seconds.")
+    return value
 
 
 # ======================================================================
@@ -109,15 +134,23 @@ def guild_access_required(fn):
     def wrapper(guild_id, *args, **kwargs):
         if "user" not in session:
             return jsonify({"error": "Not logged in."}), 401
-        allowed_ids = {g["id"] for g in session.get("manageable_guilds", [])}
-        if guild_id not in allowed_ids:
-            return jsonify({"error": "You don't have access to that server."}), 403
+        if not SNOWFLAKE_RE.fullmatch(str(guild_id)):
+            return jsonify({"error": "Invalid server ID."}), 400
         try:
-            present = bridge.run_on_bot(current_app.bot, bridge.get_manageable_guild_ids, [int(guild_id)])
+            gid = int(guild_id)
+            user_id = int(session["user"]["id"])
+            present = bridge.run_on_bot(current_app.bot, bridge.get_manageable_guild_ids, [gid])
+            if not present:
+                return jsonify({"error": "The bot isn't in that server."}), 404
+            has_access = bridge.run_on_bot(current_app.bot, bridge.verify_guild_manager, gid, user_id)
         except bridge.BotNotReady as e:
             return jsonify({"error": str(e)}), 503
-        if not present:
-            return jsonify({"error": "The bot isn't in that server."}), 404
+        except TimeoutError as e:
+            return jsonify({"error": str(e)}), 503
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid server ID."}), 400
+        if not has_access:
+            return jsonify({"error": "You no longer have Manage Server permission in that server."}), 403
         return fn(guild_id, *args, **kwargs)
     return wrapper
 
@@ -185,8 +218,8 @@ def guild_recent_joins(guild_id):
     scheduled messages, no reaction roles: those aren't real features
     here, so there's nothing honest to show for them)."""
     limit = request.args.get("limit", default=8, type=int)
-    rows = database._raw_get_joins_in_range(int(guild_id))  # oldest -> newest
-    recent = list(reversed(rows))[:max(1, min(limit, 25))]
+    limit = max(1, min(limit, 25))
+    recent = database._raw_get_joins_in_range(int(guild_id), limit=limit, newest_first=True)
     return jsonify({"joins": [
         {"user_id": r[0], "user_name": r[1], "inviter_name": r[2],
          "invite_code": r[3], "join_date": r[4], "account_age_days": r[5]}
@@ -247,36 +280,64 @@ def patch_config(guild_id):
     body = request.get_json(silent=True) or {}
     updated = []
 
-    if "prefix" in body:
-        prefix = (body["prefix"] or "")[:5]
-        if not prefix:
-            return jsonify({"error": "Prefix cannot be empty."}), 400
-        database._raw_set_prefix(gid, prefix)
-        database.guild_prefix_cache[gid] = prefix  # keep the bot's in-memory cache consistent immediately
-        updated.append("prefix")
+    try:
+        if not isinstance(body, dict):
+            raise ValueError("Request body must be a JSON object.")
 
-    if "log_channel_id" in body:
-        database._raw_set_guild_log_channel(gid, body["log_channel_id"])
-        updated.append("log_channel_id")
+        prefix = None
+        if "prefix" in body:
+            prefix = str(body["prefix"] or "")[:5]
+            if not prefix or "\n" in prefix or "\r" in prefix:
+                raise ValueError("Prefix must be 1–5 characters and cannot contain line breaks.")
 
-    if "alert_role_id" in body:
-        database._raw_set_alert_role(gid, body["alert_role_id"])
-        updated.append("alert_role_id")
+        config_ids = {}
+        for field in ("log_channel_id", "alert_role_id", "mod_role_id", "music_role_id", "music_channel_id"):
+            if field in body:
+                config_ids[field] = _parse_optional_snowflake(body[field], field)
 
-    if "mod_role_id" in body:
-        database._raw_set_mod_role(gid, body["mod_role_id"])
-        updated.append("mod_role_id")
+        lock_seconds = _parse_lock_seconds(body["music_lock_seconds"]) if "music_lock_seconds" in body else None
+        if "music_lock_seconds" in body:
+            config_ids["music_lock_seconds"] = lock_seconds
 
-    music_kwargs = {}
-    if "music_role_id" in body:
-        music_kwargs["role_id"] = body["music_role_id"]
-    if "music_lock_seconds" in body:
-        music_kwargs["lock_time"] = body["music_lock_seconds"]
-    if "music_channel_id" in body:
-        music_kwargs["channel_id"] = body["music_channel_id"]
-    if music_kwargs:
-        database._raw_set_music_config(gid, **music_kwargs)
-        updated.extend(music_kwargs.keys())
+        if config_ids:
+            ok, error = bridge.run_on_bot(current_app.bot, bridge.validate_guild_config_ids, gid, config_ids)
+            if not ok:
+                return jsonify({"error": error}), 400
+
+        # Validate everything first so a bad role/channel cannot leave the
+        # request half-applied. Only after validation do we touch PostgreSQL.
+        if "prefix" in body:
+            database._raw_set_prefix(gid, prefix)
+            database.guild_prefix_cache[gid] = prefix
+            updated.append("prefix")
+
+        for field in ("log_channel_id", "alert_role_id", "mod_role_id"):
+            if field in config_ids:
+                setter = {
+                    "log_channel_id": database._raw_set_guild_log_channel,
+                    "alert_role_id": database._raw_set_alert_role,
+                    "mod_role_id": database._raw_set_mod_role,
+                }[field]
+                setter(gid, config_ids[field])
+                updated.append(field)
+
+        music_kwargs = {}
+        if "music_role_id" in config_ids:
+            music_kwargs["role_id"] = config_ids["music_role_id"]
+        if "music_lock_seconds" in config_ids:
+            music_kwargs["lock_time"] = config_ids["music_lock_seconds"]
+        if "music_channel_id" in config_ids:
+            music_kwargs["channel_id"] = config_ids["music_channel_id"]
+        if music_kwargs:
+            database._raw_set_music_config(gid, **music_kwargs)
+            updated.extend(field for field in ("music_role_id", "music_lock_seconds", "music_channel_id") if field in config_ids)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except (bridge.BotNotReady, TimeoutError) as exc:
+        return jsonify({"error": str(exc)}), 503
+    except Exception:
+        logger.exception("Dashboard config update failed for guild %s", guild_id)
+        return jsonify({"error": "Could not save that configuration. Please try again."}), 500
 
     if not updated:
         return jsonify({"error": "No recognized fields in request body."}), 400

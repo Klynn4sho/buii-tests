@@ -11,6 +11,9 @@ pre-rating); the renumber prompt keeps its danger-red accent as a
 destructive-action warning.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timezone, timedelta
 import re
 import io
@@ -119,7 +122,7 @@ class PreviewButton(ui.Button):
                 file=discord.File(io.BytesIO(data), filename=f"{safe_title}-{song['song_number']}.{extension}"),
             )
         except Exception as e:
-            print(f"[music] preview failed (song {self.song_id}): {e!r}")
+            logger.exception("[music] operation failed")
             try:
                 if interaction.response.is_done():
                     await interaction.followup.send(
@@ -132,7 +135,7 @@ class PreviewButton(ui.Button):
                         ephemeral=True,
                     )
             except Exception:
-                pass
+                logger.debug("Non-fatal exception suppressed", exc_info=True)
 
 
 class RatingButton(ui.Button):
@@ -149,7 +152,7 @@ class RatingButton(ui.Button):
         try:
             await self._vote(interaction)
         except Exception as e:
-            print(f"[music] vote failed (song {self.song_id}, score {self.score}): {e!r}")
+            logger.exception("[music] operation failed")
             try:
                 message = notice("❌ Couldn't register that vote — please try again.")
                 if interaction.response.is_done():
@@ -157,7 +160,7 @@ class RatingButton(ui.Button):
                 else:
                     await interaction.response.send_message(view=message, ephemeral=True)
             except Exception:
-                pass
+                logger.debug("Non-fatal exception suppressed", exc_info=True)
 
     async def _vote(self, interaction: discord.Interaction):
         song = await database.get_song(self.guild_id, self.song_id)

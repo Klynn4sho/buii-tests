@@ -22,7 +22,7 @@ Environment Variables:
 
 import asyncio
 import os
-import traceback
+import logging
 from difflib import get_close_matches
 import signal
 from datetime import datetime, timezone
@@ -35,9 +35,11 @@ from discord.ext import commands
 
 from core import database
 from core.components import notice
-from core.config import BOT_TOKEN, DEFAULT_PREFIX
+from core.config import APP_ENV, BOT_TOKEN, DEFAULT_PREFIX
 
 EXTENSIONS = ("cogs.growth", "cogs.music", "cogs.hierarchy", "cogs.serverinfo", "cogs.admin")
+
+logger = logging.getLogger("buii")
 
 
 # --- Web dashboard (also doubles as the process's keep-alive server on
@@ -52,7 +54,13 @@ def run_web_server():
     from web.app import create_app
     app = create_app(bot)
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, use_reloader=False)
+    if os.environ.get("WEB_DEV_SERVER") == "1":
+        logger.warning("Using Flask development server because WEB_DEV_SERVER=1")
+        app.run(host="0.0.0.0", port=port, use_reloader=False)
+        return
+    from waitress import serve
+    logger.info("Starting production WSGI server on 0.0.0.0:%s", port)
+    serve(app, host="0.0.0.0", port=port, threads=max(4, int(os.environ.get("WEB_THREADS", "8"))))
 
 
 def keep_alive():
@@ -105,16 +113,15 @@ class BuiiBot(commands.Bot):
         for extension in EXTENSIONS:
             try:
                 await self.load_extension(extension)
-                print(f"Loaded extension: {extension}")
+                logger.info("Loaded extension: %s", extension)
             except Exception:
-                print(f"Failed to load extension: {extension}")
-                traceback.print_exc()
+                logger.exception("Failed to load extension: %s", extension)
 
         try:
             synced = await self.tree.sync()
-            print(f"Synced {len(synced)} slash command(s).")
-        except Exception as e:
-            print(f"Failed to sync slash commands: {e}")
+            logger.info("Synced %d slash command(s).", len(synced))
+        except Exception:
+            logger.exception("Failed to sync slash commands")
 
     async def close(self):
         # async with bot (in run_bot) calls this on every exit path — clean
@@ -125,24 +132,29 @@ class BuiiBot(commands.Bot):
         await super().close()
 
 
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 bot = BuiiBot()
 
 
 @bot.event
 async def on_ready():
-    print(f"Bot connected as: {bot.user}")
+    logger.info("Bot connected as: %s", bot.user)
 
 
 @bot.event
 async def on_disconnect():
     # Fires on every gateway drop, including ones discord.py auto-recovers
     # from — this is a log line, not necessarily an outage.
-    print(f"[{datetime.now(timezone.utc).isoformat()}] Gateway disconnected — attempting to reconnect...")
+    logger.warning("Gateway disconnected — attempting to reconnect...")
 
 
 @bot.event
 async def on_resumed():
-    print(f"[{datetime.now(timezone.utc).isoformat()}] Gateway session resumed.")
+    logger.info("Gateway session resumed.")
 
 
 @bot.event
@@ -200,7 +212,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
                 try:
                     await interaction.edit_original_response(view=view)
                 except Exception:
-                    pass
+                    logger.debug("Could not disable the command suggestion button after use", exc_info=True)
 
             view = _command_hint_view(
                 f"Command `{attempted}` does not exist",
@@ -246,14 +258,13 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
     elif isinstance(error, commands.CommandOnCooldown):
         text = f"⏱️ That command is on cooldown. Try again in {error.retry_after:.1f}s."
     else:
-        print(f"Unhandled command error in '{ctx.command}' ({ctx.guild} / {ctx.author}):")
-        traceback.print_exception(type(error), error, error.__traceback__)
+        logger.exception("Unhandled command error in %r (%s / %s)", ctx.command, ctx.guild, ctx.author)
         text = "❌ Something went wrong running that command. The error was logged."
 
     try:
         await ctx.send(view=notice(text))
     except Exception:
-        pass
+        logger.debug("Could not send command error response", exc_info=True)
 
 
 @bot.tree.error
@@ -267,8 +278,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     elif isinstance(error, app_commands.CommandOnCooldown):
         message = f"⏱️ That command is on cooldown. Try again in {error.retry_after:.1f}s."
     else:
-        print(f"Unhandled app command error in {interaction.command}:")
-        traceback.print_exception(type(error), error, error.__traceback__)
+        logger.exception("Unhandled app command error in %r", interaction.command)
         message = "❌ Something went wrong running that command. The error was logged."
 
     try:
@@ -277,17 +287,17 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         else:
             await interaction.response.send_message(view=notice(message), ephemeral=True)
     except Exception:
-        pass
+        logger.debug("Could not send application-command error response", exc_info=True)
 
 
 async def shutdown_cleanup():
     """Closes the Postgres pool — bot.close() (overridden above) already
     handles the aiohttp session — so a SIGTERM-based redeploy (most
     container platforms) doesn't leak sockets/connections."""
-    print(f"[{datetime.now(timezone.utc).isoformat()}] Shutting down — closing DB pool...")
+    logger.info("Shutting down — closing DB pool...")
     if database.db_pool is not None:
-        database.db_pool.closeall()
-    print(f"[{datetime.now(timezone.utc).isoformat()}] Shutdown complete.")
+        database.close_db_pool()
+    logger.info("Shutdown complete.")
 
 
 async def run_bot():
@@ -295,7 +305,7 @@ async def run_bot():
     stop_event = asyncio.Event()
 
     def _handle_signal(sig_name):
-        print(f"[{datetime.now(timezone.utc).isoformat()}] Received {sig_name} — starting graceful shutdown...")
+        logger.info("Received %s — starting graceful shutdown...", sig_name)
         stop_event.set()
 
     # asyncio.run() only turns SIGINT into a KeyboardInterrupt automatically;
@@ -306,7 +316,7 @@ async def run_bot():
         try:
             loop.add_signal_handler(sig, _handle_signal, sig.name)
         except (NotImplementedError, AttributeError):
-            pass  # add_signal_handler isn't available on Windows
+            logger.debug("Signal handlers are unavailable on this platform; relying on process shutdown.")
 
     async with bot:
         start_task = asyncio.create_task(bot.start(BOT_TOKEN))

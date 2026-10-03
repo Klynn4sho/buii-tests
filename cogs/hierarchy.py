@@ -55,7 +55,7 @@ class HierarchyCog(commands.Cog, name="HierarchyCog"):
                 requested_by=f"Requested by {ctx.author.display_name}",
             )
         except Exception as error:
-            print(f"[hierarchy] render failed for guild {ctx.guild.id}: {error!r}")
+            logger.exception("[hierarchy] operation failed")
             await ctx.send(view=notice("❌ Could not render the hierarchy card. Check the bot logs for details."))
             return
 

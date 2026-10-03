@@ -20,6 +20,11 @@ only for things that must be read from live discord.py objects.
 
 import asyncio
 import concurrent.futures
+import logging
+
+import discord
+
+logger = logging.getLogger(__name__)
 
 
 class BotNotReady(Exception):
@@ -47,6 +52,7 @@ def run_on_bot(bot, coro_func, *args, timeout: float = 8.0, **kwargs):
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
         future.cancel()
+        logger.warning("Bot bridge timed out after %.1fs for %s", timeout, getattr(coro_func, "__name__", "operation"))
         raise TimeoutError(f"Timed out waiting {timeout}s for the bot to respond.")
 
 
@@ -100,3 +106,47 @@ async def get_bot_health(bot, _guild_id=None) -> dict:
         "latency_ms": latency_ms,
         "guild_count": len(bot.guilds),
     }
+
+
+async def verify_guild_manager(bot, guild_id: int, user_id: int) -> bool:
+    """Verify the dashboard user has live Manage Guild/Administrator access.
+
+    This deliberately uses the bot's current Discord member permissions rather
+    than trusting the guild-permission snapshot captured during OAuth login.
+    """
+    guild = bot.get_guild(guild_id)
+    if guild is None:
+        return False
+    member = guild.get_member(user_id)
+    if member is None:
+        try:
+            member = await guild.fetch_member(user_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return False
+    perms = member.guild_permissions
+    return bool(perms.administrator or perms.manage_guild)
+
+
+async def validate_guild_config_ids(bot, guild_id: int, values: dict) -> tuple[bool, str | None]:
+    """Validate role/channel IDs against the live guild before they reach SQL."""
+    guild = bot.get_guild(guild_id)
+    if guild is None:
+        return False, "The bot isn't in that server."
+
+    role_fields = ("alert_role_id", "mod_role_id", "music_role_id")
+    channel_fields = ("log_channel_id", "music_channel_id")
+    for field in role_fields:
+        value = values.get(field)
+        if value is None:
+            continue
+        role = guild.get_role(value)
+        if role is None or role.is_default():
+            return False, f"{field} must refer to a role in this server."
+    for field in channel_fields:
+        value = values.get(field)
+        if value is None:
+            continue
+        channel = guild.get_channel(value)
+        if not isinstance(channel, discord.TextChannel):
+            return False, f"{field} must refer to a text channel in this server."
+    return True, None

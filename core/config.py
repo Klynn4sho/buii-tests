@@ -31,8 +31,12 @@ DB_POOL_MIN = max(1, int(os.environ.get("DB_POOL_MIN", "1")))
 DB_POOL_MAX = max(DB_POOL_MIN, int(os.environ.get("DB_POOL_MAX", "8")))
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-_bypass_raw = os.environ.get("BYPASS_USER_ID")
-BYPASS_USER_ID = int(_bypass_raw) if _bypass_raw else None
+APP_ENV = os.environ.get("APP_ENV", "development").strip().lower()
+_bypass_raw = os.environ.get("BYPASS_USER_ID") if APP_ENV != "production" else None
+try:
+    BYPASS_USER_ID = int(_bypass_raw) if _bypass_raw else None
+except ValueError as exc:
+    raise RuntimeError("BYPASS_USER_ID must be a numeric Discord user ID.") from exc
 
 DEFAULT_PREFIX = os.environ.get("COMMAND_PREFIX", "b,")
 

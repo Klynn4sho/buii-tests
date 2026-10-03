@@ -4,6 +4,9 @@ Components V2 dashboard content builder, the Pillow-based dynamic music
 card generator, and the matplotlib join-growth graph.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 import asyncio
 import colorsys
 import hashlib
@@ -299,7 +302,7 @@ async def create_join_card(
                         (avatar_size, avatar_size), Image.LANCZOS
                     )
         except Exception:
-            pass
+            logger.debug("Non-fatal exception suppressed", exc_info=True)
     if avatar is None:
         avatar = Image.new("RGB", (avatar_size, avatar_size), "#2B2D31")
         ImageDraw.Draw(avatar).text((avatar_size // 2 - 20, avatar_size // 2 - 25), "?", fill=muted, font=get_font(48, bold=True))
@@ -385,7 +388,7 @@ async def create_invite_stats_card(
                         (avatar_size, avatar_size), Image.LANCZOS
                     )
         except Exception:
-            pass
+            logger.debug("Non-fatal exception suppressed", exc_info=True)
     if avatar is None:
         avatar = Image.new("RGB", (avatar_size, avatar_size), "#2B2D31")
         ImageDraw.Draw(avatar).text((avatar_size // 2 - 16, avatar_size // 2 - 22), "?", fill=muted, font=get_font(42, bold=True))
@@ -571,7 +574,7 @@ async def create_music_card(session, title: str, artist: str, cover_url: str,
                 if resp.status == 200:
                     cover_bytes = await resp.read()
         except Exception:
-            pass
+            logger.debug("Non-fatal exception suppressed", exc_info=True)
 
     SCALE = 2
     W, H = 800 * SCALE, 300 * SCALE

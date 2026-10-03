@@ -8,13 +8,16 @@ the app (app.bot) so every route in web/api.py can reach it for bridging
 into live guild data via web/bridge.py.
 """
 
+import logging
 import os
 from datetime import timedelta
 
 from flask import Flask, send_from_directory
 
-from core.config import FLASK_SECRET_KEY
+from core.config import APP_ENV, FLASK_SECRET_KEY
 from web.api import bp as api_bp
+
+logger = logging.getLogger(__name__)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web_static")
 
@@ -24,12 +27,10 @@ def create_app(bot) -> Flask:
     app.bot = bot
 
     if not FLASK_SECRET_KEY:
-        # A missing secret key would otherwise fall back to Flask's dev
-        # default, which lets anyone forge a session cookie and log in as
-        # any user — refuse to run with real auth exposed that way. The
-        # health/static routes still work without it; only login does not.
-        print("[web] WARNING: FLASK_SECRET_KEY is not set — /login will be disabled "
-              "until it is. Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"")
+        # A random per-process key is safe against forged cookies, but sessions
+        # will be invalidated after a restart. Production deployments should
+        # always provide a stable, high-entropy FLASK_SECRET_KEY.
+        logger.warning("FLASK_SECRET_KEY is not set; sessions will not survive restarts. Set a strong secret in production.")
         app.secret_key = os.urandom(32)  # random per-process: sessions won't survive a restart, which is fine
     else:
         app.secret_key = FLASK_SECRET_KEY
@@ -39,7 +40,7 @@ def create_app(bot) -> Flask:
         SESSION_COOKIE_SAMESITE="Lax",
         # Only force Secure in production; localhost dev over plain http
         # would otherwise silently never send the cookie back.
-        SESSION_COOKIE_SECURE=os.environ.get("FLASK_ENV") == "production",
+        SESSION_COOKIE_SECURE=(APP_ENV == "production" or os.environ.get("FLASK_ENV") == "production"),
         PERMANENT_SESSION_LIFETIME=timedelta(days=7),
     )
 
@@ -48,6 +49,21 @@ def create_app(bot) -> Flask:
     @app.route("/")
     def index():
         return send_from_directory(STATIC_DIR, "index.html")
+
+    @app.after_request
+    def add_security_headers(response):
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' https://cdn.discordapp.com data:; font-src 'self' data:; "
+            "connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
+            "form-action 'self' https://discord.com;"
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        return response
 
     @app.route("/health")
     def plain_health():

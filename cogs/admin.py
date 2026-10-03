@@ -7,6 +7,9 @@ Help's category grouping lives in views/help_views.py (CATEGORIES), keyed
 by cog name. A cog not listed there falls into "📦 Other" automatically.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 import discord
 from discord.ext import commands
 
@@ -32,7 +35,7 @@ class AdminCog(commands.Cog, name="AdminCog"):
             view = HelpView(self.bot, ctx.author, prefix)
             view.sent_message = await ctx.send(view=view)
         except Exception as e:
-            print(f"[help] failed to open help menu: {e!r}")
+            logger.exception("[help] operation failed")
             # Keep help usable even if a newly added command has malformed
             # metadata or Discord rejects one interactive component.
             try:
@@ -51,7 +54,7 @@ class AdminCog(commands.Cog, name="AdminCog"):
                 try:
                     await ctx.send(view=notice("❌ Couldn't open the help menu — try again in a moment."))
                 except Exception:
-                    pass
+                    logger.debug("Non-fatal exception suppressed", exc_info=True)
 
     @commands.hybrid_command(
         name="diagnostics",
@@ -133,7 +136,7 @@ class AdminCog(commands.Cog, name="AdminCog"):
             else:
                 await ctx.send(view=notice(message))
         except discord.HTTPException as e:
-            print(f"[sync] failed: {e!r}")
+            logger.exception("[sync] operation failed")
             if ctx.interaction and ctx.interaction.response.is_done():
                 await ctx.followup.send(view=notice("❌ Discord rejected the sync request — try again shortly."), ephemeral=True)
             else:

@@ -14,6 +14,9 @@ tree, de-duplicated by name), so a newly added command appears here
 without touching this file. Only the person who ran help can use the menu.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 import functools
 import math
 from dataclasses import dataclass, field
@@ -153,7 +156,7 @@ def _guard(fn):
         try:
             return await fn(self, interaction, *args, **kwargs)
         except Exception as e:
-            print(f"[help] {fn.__name__} failed: {e!r}")
+            logger.exception("[help] operation failed")
             try:
                 message = notice("❌ Something went wrong with the help menu — try running help again.")
                 if interaction.response.is_done():
@@ -161,7 +164,7 @@ def _guard(fn):
                 else:
                     await interaction.response.send_message(view=message, ephemeral=True)
             except Exception:
-                pass
+                logger.debug("Non-fatal exception suppressed", exc_info=True)
     return wrapper
 
 
@@ -186,7 +189,7 @@ class SearchModal(ui.Modal, title="Search commands"):
         await interaction.response.edit_message(view=hv)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
-        print(f"[help] search modal failed: {error!r}")
+        logger.exception("[help] operation failed")
         try:
             message = notice("❌ Couldn't run that search.")
             if interaction.response.is_done():
@@ -194,7 +197,7 @@ class SearchModal(ui.Modal, title="Search commands"):
             else:
                 await interaction.response.send_message(view=message, ephemeral=True)
         except Exception:
-            pass
+            logger.debug("Non-fatal exception suppressed", exc_info=True)
 
 
 class HelpView(ui.LayoutView):
@@ -409,7 +412,7 @@ class HelpView(ui.LayoutView):
             try:
                 await interaction.message.delete()
             except Exception:
-                pass
+                logger.debug("Non-fatal exception suppressed", exc_info=True)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.invoker.id:
@@ -427,4 +430,4 @@ class HelpView(ui.LayoutView):
             try:
                 await self.sent_message.edit(view=self)
             except Exception:
-                pass
+                logger.debug("Non-fatal exception suppressed", exc_info=True)

@@ -11,6 +11,9 @@ listings, rating inspection, the duplicate notice. Config confirmations,
 errors and one-line replies are plain, un-accented containers.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 import asyncio
 from datetime import datetime, timezone, timedelta
 
@@ -105,11 +108,11 @@ class MusicCog(commands.Cog, name="MusicCog"):
                         avg, count = await database.get_song_stats(row["guild_id"], row["id"])
                         await message.edit(view=ClosedRatingView())
                     except Exception:
-                        pass
+                        logger.debug("Non-fatal exception suppressed", exc_info=True)
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            print(f"[music] expiry sweep failed: {error!r}")
+            logger.exception("[music] operation failed")
 
     @expiry_sweep_loop.before_loop
     async def before_expiry_sweep_loop(self):
@@ -157,7 +160,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
                 delete_after=30,
             )
         except Exception:
-            pass
+            logger.debug("Non-fatal exception suppressed", exc_info=True)
 
     async def post_song(self, channel, source, url, title, artist, requester: discord.abc.User,
                          guild_id: int, channel_id: int, cover_url=None, preview_url=None):
@@ -285,7 +288,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
                     message = await channel.fetch_message(song["message_id"])
                     await message.edit(view=ClosedRatingView())
                 except Exception:
-                    pass
+                    logger.debug("Non-fatal exception suppressed", exc_info=True)
 
         text = (
             "## 🔒 VOTING CLOSED\n"
@@ -455,11 +458,11 @@ class MusicCog(commands.Cog, name="MusicCog"):
             await self.post_song(interaction.channel, "Manual Request", track_url, title or query, artist, interaction.user,
                                   interaction.guild.id if interaction.guild else 0, interaction.channel.id, cover_url, preview_url)
         except Exception as e:
-            print(f"[music] /song failed for query {query!r}: {e!r}")
+            logger.exception("[music] operation failed")
             try:
                 await interaction.followup.send(view=notice("❌ Couldn't post that song — try again in a moment."), ephemeral=True)
             except Exception:
-                pass
+                logger.debug("Non-fatal exception suppressed", exc_info=True)
 
     @app_commands.command(name="musicleaderboard", description="Show the top rated songs in this server")
     @app_commands.describe(min_score="Only show songs with an average rating at or above this value (0-10)")
@@ -502,11 +505,11 @@ class MusicCog(commands.Cog, name="MusicCog"):
             artist_str = f" by **{artist}**" if artist else ""
             await interaction.followup.send(view=notice(f"✅ Successfully removed **{title}**{artist_str} (ID: `{song_id}`) from the database."))
         except Exception as e:
-            print(f"[music] /removesong failed for id {song_id}: {e!r}")
+            logger.exception("[music] operation failed")
             try:
                 await interaction.followup.send(view=notice("❌ Something went wrong removing that song."))
             except Exception:
-                pass
+                logger.debug("Non-fatal exception suppressed", exc_info=True)
 
     @commands.hybrid_command(name="renumbersongs", description="Re-sequences song IDs to close gaps left by deletions, and repairs live rating buttons.")
     @commands.has_permissions(administrator=True)
@@ -524,7 +527,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         try:
             mapping = await database.renumber_songs(ctx.guild.id)
         except Exception as error:
-            print(f"[music] /renumbersongs failed for guild {ctx.guild.id}: {error!r}")
+            logger.exception("[music] operation failed")
             await confirm_msg.edit(view=notice("❌ Something went wrong running that command."))
             return
 
@@ -563,7 +566,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
                     await message.edit(view=new_view)
                 repaired += 1
             except Exception as error:
-                print(f"[music] couldn't repair song message {row['id']}: {error!r}")
+                logger.exception("[music] operation failed")
                 failed += 1
 
         result_text = (

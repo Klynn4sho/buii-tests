@@ -5,6 +5,9 @@ playlist sync/remove. Pure networking logic with no Discord or DB coupling,
 so it's easy to test or reuse on its own.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 import asyncio
 import re
 from urllib.parse import quote
@@ -73,7 +76,7 @@ async def fetch_spotify_artist(session: aiohttp.ClientSession, url: str):
                 if parts:
                     return parts[0]
     except Exception:
-        pass
+        logger.debug("Non-fatal exception suppressed", exc_info=True)
     return None
 
 
@@ -121,7 +124,7 @@ async def fetch_song_metadata(session: aiohttp.ClientSession, source: str, url: 
                         None
                     )
     except Exception:
-        pass
+        logger.debug("Non-fatal exception suppressed", exc_info=True)
     return None, None, None, None
 
 
@@ -143,7 +146,7 @@ async def search_itunes(session: aiohttp.ClientSession, query: str):
                     if title:
                         return title, artist, cover_url, track_url, preview_url
     except Exception:
-        pass
+        logger.debug("Non-fatal exception suppressed", exc_info=True)
     return None
 
 
@@ -162,7 +165,7 @@ async def lookup_song_genre(session: aiohttp.ClientSession, title: str, artist: 
                 if results:
                     return results[0].get("primaryGenreName")
     except Exception:
-        pass
+        logger.debug("Non-fatal exception suppressed", exc_info=True)
     return None
 
 
@@ -184,7 +187,7 @@ async def search_deezer(session: aiohttp.ClientSession, query: str):
                     if title:
                         return title, artist, cover_url, track_url, preview_url
     except Exception:
-        pass
+        logger.debug("Non-fatal exception suppressed", exc_info=True)
     return None
 
 
@@ -263,7 +266,7 @@ async def _get_spotify_token(session: aiohttp.ClientSession):
                 _spotify_token_cache["expires_at"] = now + data.get("expires_in", 3600) - 60
                 return token
     except Exception:
-        pass
+        logger.debug("Non-fatal exception suppressed", exc_info=True)
     return None
 
 
@@ -289,7 +292,7 @@ async def search_spotify(session: aiohttp.ClientSession, query: str):
                     if title:
                         return title, artist, cover_url, track_url, preview_url
     except Exception:
-        pass
+        logger.debug("Non-fatal exception suppressed", exc_info=True)
     return None
 
 
