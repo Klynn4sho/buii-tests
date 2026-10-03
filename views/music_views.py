@@ -29,7 +29,7 @@ from core import database
 from core.config import RATING_WINDOW_HOURS
 from core.components import SimpleLayout, footer_line, notice
 from core.helpers import create_music_card, format_elapsed
-from core.music_utils import fetch_canonical_preview, fetch_lyrics, remove_from_spotify
+from core.music_utils import fetch_canonical_preview, fetch_deezer_audio_features, fetch_lyrics, remove_from_spotify
 
 
 def _track_text(title: str, artist: str, preview_url: str = None, url: str = None,
@@ -302,6 +302,82 @@ class PreviewButton(ui.Button):
 
 
 
+class MatchButton(ui.Button):
+    def __init__(self, guild_id: int, song_id: int):
+        super().__init__(
+            label="🎧 Match",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"match|{song_id}",
+        )
+        self.guild_id = guild_id
+        self.song_id = song_id
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            song = await database.get_song(self.guild_id, self.song_id)
+            if not song:
+                await interaction.response.send_message(
+                    view=notice("❌ This song is no longer available."),
+                    ephemeral=True,
+                )
+                return
+
+            session = getattr(interaction.client, "http_session", None)
+            match = await fetch_deezer_audio_features(
+                session,
+                song.get("url"),
+                song.get("title"),
+                song.get("artist"),
+            )
+            if not match:
+                await interaction.response.send_message(
+                    view=notice("ℹ️ No canonical match was found for this track."),
+                    ephemeral=True,
+                )
+                return
+
+            source_variant = any(
+                marker in (song.get("title") or "").casefold()
+                for marker in ("sped up", "slowed", "nightcore", "reverb", "remix")
+            )
+            preview_status = (
+                "✅ Clean preview available"
+                if match.get("preview_url")
+                else "⚠️ No clean preview available; the original source will be kept"
+            )
+            variant_note = (
+                " · Source appears to be a speed/remix variant"
+                if source_variant else ""
+            )
+            text = (
+                "## 🎧 TRACK MATCH\n"
+                f"**{match.get('title') or 'Unknown Title'}** · "
+                f"{match.get('artist') or 'Unknown Artist'}\n"
+                f"Provider · **Deezer**{variant_note}\n"
+                f"{preview_status}"
+            )
+            if match.get("track_url"):
+                text += f"\n\n[Open matched track]({match['track_url']})"
+
+            await interaction.response.send_message(
+                view=SimpleLayout(text),
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception:
+            logger.exception("[music] track match lookup failed")
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    view=notice("❌ Couldn't match this track right now."),
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    view=notice("❌ Couldn't match this track right now."),
+                    ephemeral=True,
+                )
+
+
 class LyricsButton(ui.Button):
     def __init__(self, guild_id: int, song_id: int):
         super().__init__(
@@ -438,6 +514,7 @@ class RatingView(ui.LayoutView):
         link_buttons = [
             PreviewButton(guild_id, song_id, disabled=preview_used),
             LyricsButton(guild_id, song_id),
+            MatchButton(guild_id, song_id),
         ]
         if url:
             link_buttons.append(ui.Button(label="↗ Source", style=discord.ButtonStyle.link, url=url))
