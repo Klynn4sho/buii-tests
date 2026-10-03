@@ -90,9 +90,9 @@
       </nav>
       <div class="section-label">Analytics sections</div>
       <nav class="nav analytics-nav">
-        <button class="nav-item analytics-jump" data-page="stats" data-scroll-target="analytics-growth"><span class="dot"></span>Growth &amp; Retention</button>
-        <button class="nav-item analytics-jump" data-page="stats" data-scroll-target="analytics-music"><span class="dot"></span>Music Operations</button>
-        <button class="nav-item analytics-jump" data-page="stats" data-scroll-target="analytics-reliability"><span class="dot"></span>Reliability &amp; Admin</button>
+        <button class="nav-item analytics-jump" data-page="stats-growth"><span class="dot"></span>Growth &amp; Retention</button>
+        <button class="nav-item analytics-jump" data-page="stats-music"><span class="dot"></span>Music Operations</button>
+        <button class="nav-item analytics-jump" data-page="stats-reliability"><span class="dot"></span>Reliability &amp; Admin</button>
       </nav>
       <div class="section-label">Your servers</div>
       <div class="server-list" id="serverList">
@@ -293,8 +293,8 @@
         <div class="page-header">
           <div>
             <div class="eyebrow">Server analytics</div>
-            <h1>Statistics</h1>
-            <p>Real numbers from BUII's own database and live connection — nothing here is simulated.</p>
+            <h1 id="statsPageTitle">Statistics</h1>
+            <p id="statsPageSubtitle">Real numbers from BUII's own database and live connection — nothing here is simulated.</p>
           </div>
           <div class="page-header-actions">
             <select hidden class="period-select" id="growthPeriod">
