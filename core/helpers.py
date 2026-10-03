@@ -566,7 +566,8 @@ def _draw_genre_chip(draw: ImageDraw.ImageDraw, x: int, y: int, genre: str, font
 
 
 async def create_music_card(session, title: str, artist: str, cover_url: str,
-                             avg: float = 0.0, count: int = 0, genre: str = None, rank: int = None, song_number: int = None):
+                             avg: float = 0.0, count: int = 0, genre: str = None, rank: int = None,
+                             song_number: int = None, status: str = "open"):
     cover_bytes = None
     if cover_url:
         try:
@@ -607,9 +608,11 @@ async def create_music_card(session, title: str, artist: str, cover_url: str,
         grad.putpixel((0, y), tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3)))
     card.paste(grad.resize((W, H)), (0, 0))
 
-    ImageDraw.Draw(card).rectangle([0, 0, 8 * SCALE, H], fill=_rgb_to_hex(dominant_rgb))
-
     draw = ImageDraw.Draw(card)
+    # A thin full-frame border keeps the Pillow card aligned with the other
+    # invite-style cards without the distracting one-sided accent stripe.
+    draw.rounded_rectangle([2 * SCALE, 2 * SCALE, W - 2 * SCALE, H - 2 * SCALE],
+                           radius=16 * SCALE, outline=_rgb_to_hex(dominant_rgb), width=2 * SCALE)
 
     art_box = (PAD, (H - ART) // 2, PAD + ART, (H - ART) // 2 + ART)
     mask = _rounded_mask((ART, ART), radius=18 * SCALE)
@@ -664,6 +667,23 @@ async def create_music_card(session, title: str, artist: str, cover_url: str,
 
     draw.text((text_x, top_y), safe_title, fill="#FFFFFF", font=font_title)
     draw.text((text_x, top_y + 46 * SCALE), safe_artist, fill="#B5BAC1", font=font_artist)
+
+    # Keep the lifecycle state visible without adding another container accent.
+    status_meta = {
+        "open": ("OPEN", "#57F287"),
+        "closed": ("CLOSED", "#FEE75C"),
+        "playlist": ("ADDED TO PLAYLIST", "#2BC7C4"),
+    }
+    status_label, status_color = status_meta.get(str(status).lower(), status_meta["open"])
+    status_font = get_font(14 * SCALE, bold=True)
+    status_w = int(draw.textlength(status_label, font=status_font) + 20 * SCALE)
+    status_h = status_font.size + 10 * SCALE
+    status_x = text_right - status_w
+    status_y = art_box[3] - 64 * SCALE
+    draw.rounded_rectangle([status_x, status_y, text_right, status_y + status_h],
+                           radius=status_h // 2, fill="#18191C", outline=status_color, width=2 * SCALE)
+    draw.text((status_x + 10 * SCALE, status_y + 5 * SCALE),
+              status_label, fill=status_color, font=status_font)
 
     wave_y = top_y + 78 * SCALE
     wave_h = 20 * SCALE
