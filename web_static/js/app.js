@@ -221,6 +221,7 @@ function selectServer(id) {
   Promise.allSettled([
     loadOverview(id),
     loadGrowthChart(id),
+    loadAnalytics(id),
     loadLeaderboard(id),
     loadMusicLeaderboard(id),
     loadMusicLog(id),
@@ -295,6 +296,92 @@ async function loadGrowthChart(guildId) {
     document.getElementById("anaPeakDay").textContent = peak.date ? new Date(peak.date).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—";
     document.getElementById("anaPeakJoins").textContent = peak.date ? `${peak.joins} joins on peak day` : "No growth data";
 
+  } catch (e) { showLoadError(e); }
+}
+
+
+async function loadAnalytics(guildId) {
+  if (!guildId) return;
+  try {
+    const d = await (await apiFetch(`/api/guilds/${guildId}/analytics`)).json();
+    const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+    const n = value => fmtNum(Number(value) || 0);
+    const growth = d.growth || {};
+    const retention = d.retention || {};
+    const risk = d.risk || {};
+    const queue = d.queue || {};
+    const ratings = d.ratings || {};
+    const telemetry = d.telemetry || {};
+    const syncSummary = d.sync_summary || {};
+    const playlistVisible = Boolean(d.spotify_premium);
+    ["playlistSyncCard", "playlistSyncFailuresCard", "healthSyncRow", "healthSyncQueueRow"].forEach(id => {
+      const element = document.getElementById(id);
+      if (element) element.hidden = !playlistVisible;
+    });
+
+    set("analyticsTrackedInvites", n(growth.tracked_invites));
+    set("analyticsCurrentJoins", n(growth.current_joins));
+    set("analyticsRetained7d", n(retention.retained_joins));
+    set("analyticsMatureJoins", n(retention.mature_joins));
+    set("analyticsReturningMembers", n(retention.returning_members));
+
+    const current = Number(growth.current_joins) || 0;
+    const previous = Number(growth.previous_joins) || 0;
+    const change = previous ? ((current - previous) / previous) * 100 : null;
+    set("analyticsJoinChange", change === null ? "New data" : `${change >= 0 ? "+" : ""}${change.toFixed(1)}%`);
+    set("analyticsCurrentPeriod", n(current));
+    set("analyticsBestPeriod", current >= previous ? "Current" : "Previous");
+
+    set("analyticsNewAccountRisk", n(risk.new_account));
+    set("analyticsAmbiguousInvites", n(risk.ambiguous_invites));
+    set("analyticsOpenSongs", n(queue.open_songs));
+    set("analyticsAwaitingPreview", n(queue.awaiting_preview));
+
+    const total = Number(ratings.total) || 0;
+    const buckets = [
+      ["Low", ratings.low, "ratingBarLow", "ratingCountLow"],
+      ["Below", ratings.below_average, "ratingBarBelow", "ratingCountBelow"],
+      ["Average", ratings.average, "ratingBarAverage", "ratingCountAverage"],
+      ["Good", ratings.good, "ratingBarGood", "ratingCountGood"],
+      ["Excellent", ratings.excellent, "ratingBarExcellent", "ratingCountExcellent"],
+    ];
+    buckets.forEach(([, count, barId, countId]) => {
+      const amount = Number(count) || 0;
+      const bar = document.getElementById(barId);
+      if (bar) bar.style.width = `${total ? Math.round(amount / total * 100) : 0}%`;
+      set(countId, n(amount));
+    });
+
+    const commandTotal = Number(telemetry.commands_today) || 0;
+    const commandErrors = Number(telemetry.command_errors) || 0;
+    set("analyticsCommandsToday", n(commandTotal));
+    set("analyticsMostUsedCommand", telemetry.most_used_command ? `/${telemetry.most_used_command}` : "—");
+    set("analyticsCommandErrorRate", commandTotal ? `${(commandErrors / commandTotal * 100).toFixed(1)}%` : "0%");
+    set("analyticsSyncFailures", n(telemetry.sync_failures));
+    set("analyticsSyncAttempts", n(telemetry.sync_attempts));
+    set("analyticsCatalogSongs", n(syncSummary.catalog_songs));
+    set("analyticsMarkedSynced", n(syncSummary.marked_synced));
+    set("analyticsPlaylistTracks", n(syncSummary.playlist_track_count));
+    set("analyticsMatchedSongs", n(syncSummary.matched_song_count));
+    const eventBox = document.getElementById("analyticsAdminEvents");
+    if (eventBox) {
+      eventBox.replaceChildren();
+      const events = telemetry.admin_events || [];
+      if (!events.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty-state compact";
+        empty.innerHTML = "<strong>No admin events yet</strong><span>Configuration changes will appear here as they happen.</span>";
+        eventBox.appendChild(empty);
+      } else {
+        events.forEach(event => {
+          const row = document.createElement("div");
+          row.className = "metric-placeholder";
+          const when = new Date(event.created_at).toLocaleString();
+          row.innerHTML = `<span>${escapeHTML(event.details || event.name)}</span><strong>${escapeHTML(when)}</strong>`;
+          eventBox.appendChild(row);
+        });
+      }
+    }
   } catch (e) { showLoadError(e); }
 }
 
@@ -447,6 +534,11 @@ async function loadMusicInsights(guildId) {
     });
     markUpdated("requestersUpdated");
     const sync = d.sync || {};
+    const playlistVisible = Boolean(d.spotify_premium);
+    ["healthSyncRow", "healthSyncQueueRow"].forEach(id => {
+      const element = document.getElementById(id);
+      if (element) element.hidden = !playlistVisible;
+    });
     const syncText = !sync.playlist_configured ? "Not configured" : `${sync.synced}/${sync.total} synced`;
     document.getElementById("healthSync").textContent = syncText;
     document.getElementById("healthSyncQueue").textContent = sync.playlist_configured ? `${sync.pending} pending` : "Playlist unavailable";
@@ -664,11 +756,18 @@ document.querySelectorAll("[data-page]").forEach(btn => btn.addEventListener("cl
 }));
 document.getElementById("viewActivityButton").addEventListener("click", () => { showPage("stats"); closeMenus(); });
 document.getElementById("refreshRecentJoinsButton").addEventListener("click", () => loadRecentJoins(currentGuildId));
+function downloadExport(kind) {
+  if (!currentGuildId) return;
+  window.location.href = `/api/guilds/${currentGuildId}/exports/${kind}`;
+}
+document.getElementById("exportJoinsButton")?.addEventListener("click", () => downloadExport("joins"));
+document.getElementById("exportSongsButton")?.addEventListener("click", () => downloadExport("songs"));
+document.getElementById("exportActivityButton")?.addEventListener("click", () => downloadExport("activity"));
 document.getElementById("refreshDashboardButton").addEventListener("click", async () => {
   if (!currentGuildId) return;
   const button = document.getElementById("refreshDashboardButton");
   button.disabled = true;
-  await Promise.allSettled([loadOverview(currentGuildId), loadGrowthChart(currentGuildId), loadLeaderboard(currentGuildId), loadMusicLeaderboard(currentGuildId), loadMusicLog(currentGuildId), loadMusicInsights(currentGuildId), loadRecentJoins(currentGuildId), loadConfig(currentGuildId)]);
+  await Promise.allSettled([loadOverview(currentGuildId), loadGrowthChart(currentGuildId), loadAnalytics(currentGuildId), loadLeaderboard(currentGuildId), loadMusicLeaderboard(currentGuildId), loadMusicLog(currentGuildId), loadMusicInsights(currentGuildId), loadRecentJoins(currentGuildId), loadConfig(currentGuildId)]);
   button.disabled = false;
   toast("Dashboard refreshed just now");
 });
