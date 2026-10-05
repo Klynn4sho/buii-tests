@@ -194,7 +194,10 @@ class PreviewButton(ui.Button):
                 )
                 return
 
-            await interaction.response.defer()
+            await interaction.response.send_message(
+                view=notice("⏳ Sending audio preview…"),
+                ephemeral=True,
+            )
 
             session = getattr(interaction.client, "http_session", None)
             if session is None:
@@ -271,9 +274,8 @@ class PreviewButton(ui.Button):
                         session, token, channel_id, voice_name,
                         voice_data, duration, waveform,
                     )
-                    await interaction.followup.send(
+                    await interaction.edit_original_response(
                         view=notice("✅ Sent as a voice message."),
-                        ephemeral=True,
                     )
                     return
                 except Exception as exc:
@@ -283,13 +285,15 @@ class PreviewButton(ui.Button):
             await interaction.followup.send(
                 file=discord.File(io.BytesIO(data), filename=fallback_name),
             )
+            await interaction.edit_original_response(
+                view=notice("✅ Preview sent."),
+            )
         except Exception:
             logger.exception("[music] operation failed")
             try:
                 if interaction.response.is_done():
-                    await interaction.followup.send(
+                    await interaction.edit_original_response(
                         view=notice("❌ Couldn't send the audio preview — try again later."),
-                        ephemeral=True,
                     )
                 else:
                     await interaction.response.send_message(
@@ -436,6 +440,13 @@ class RatingButton(ui.Button):
                 logger.debug("Non-fatal exception suppressed", exc_info=True)
 
     async def _vote(self, interaction: discord.Interaction):
+        if await database.is_vote_blacklisted(self.guild_id, interaction.user.id):
+            await interaction.response.send_message(
+                view=notice("🚫 You are blocked from submitting music ratings in this server."),
+                ephemeral=True,
+            )
+            return
+
         song = await database.get_song(self.guild_id, self.song_id)
 
         if song and song.get("closed"):
@@ -472,8 +483,10 @@ class RatingButton(ui.Button):
             requester_name=song["requested_by_name"], avg=avg, count=count,
             preview_url=song["preview_url"], url=song["url"], card_file=new_file,
             accent_rgb=dominant_rgb, vote_note=f"Latest vote: {self.score}/10 — use buttons to change",
-            ping_text=(f"<@{song['requested_by_id']}>" if song.get("requested_by_id") else None),
+            # Editing an existing rating card must not ping the requester again.
+            ping_text=None,
             preview_used=bool(song.get("preview_used")),
+            playlist_visible=bool(getattr(bot, "spotify_premium", False)),
         )
 
         await interaction.response.edit_message(view=new_view, attachments=[new_file])
@@ -485,7 +498,7 @@ class RatingView(ui.LayoutView):
                  requester_name: str = None, avg: float = 0.0, count: int = 0,
                  preview_url: str = None, url: str = None, card_file: "discord.File | str | None" = None,
                  accent_rgb: tuple = (88, 101, 242), ping_text: str = None, vote_note: str = None,
-                 preview_used: bool = False):
+                 preview_used: bool = False, playlist_visible: bool = False):
         """`card_file` accepts either a fresh discord.File (uploaded with
         this message) or an "attachment://<filename>" string pointing at an
         attachment that already exists on the message being edited — the
@@ -505,7 +518,7 @@ class RatingView(ui.LayoutView):
             LyricsButton(guild_id, song_id),
             TrackInfoButton(guild_id, song_id),
         ]
-        if SPOTIFY_PLAYLIST_ID:
+        if SPOTIFY_PLAYLIST_ID and playlist_visible:
             link_buttons.append(
                 ui.Button(
                     label="↗ Playlist",
@@ -529,6 +542,272 @@ class RatingView(ui.LayoutView):
         # Status is shown on the Pillow card; keep the container border neutral.
         self.container = ui.Container(*items)
         self.add_item(self.container)
+
+
+class MemberRatingsView(ui.LayoutView):
+    PAGE_SIZE = 15
+
+    def __init__(
+        self,
+        guild_id: int,
+        member_id: int,
+        member_name: str,
+        owner_id: int,
+        total: int,
+        rows: list[dict],
+        page: int = 1,
+    ):
+        super().__init__(timeout=900)
+        self.guild_id = guild_id
+        self.member_id = member_id
+        self.member_name = member_name
+        self.owner_id = owner_id
+        self.total = total
+        self.total_pages = max(1, (total + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+        self.page = max(1, min(page, self.total_pages))
+        self.rows = rows
+
+        previous = ui.Button(
+            label="Previous",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.page <= 1,
+        )
+        previous.callback = self.on_previous_page
+
+        page_label = ui.Button(
+            label=f"Page {self.page}/{self.total_pages}",
+            style=discord.ButtonStyle.secondary,
+            disabled=True,
+        )
+
+        next_page = ui.Button(
+            label="Next",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.page >= self.total_pages,
+        )
+        next_page.callback = self.on_next_page
+
+        self.container = ui.Container(
+            ui.TextDisplay(self._render_text()),
+            ui.ActionRow(previous, page_label, next_page),
+        )
+        self.add_item(self.container)
+
+    def _render_text(self) -> str:
+        lines = [
+            f"## Ratings by {self.member_name}",
+            f"**Total ratings:** {self.total} · **Page:** {self.page}/{self.total_pages}",
+            "",
+        ]
+        for row in self.rows:
+            artist = f" — {row['artist']}" if row["artist"] else ""
+            lines.append(
+                f"• **ID {row['song_number']} · {row['title']}**{artist} — **{row['score']}/10**"
+            )
+        lines.append(footer_line("Member Rating Inspector"))
+        return "\n".join(lines)
+
+    async def _show_page(self, interaction: discord.Interaction, page: int):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                view=notice("❌ These pagination controls belong to the moderator who ran the command."),
+                ephemeral=True,
+            )
+            return
+        rows = await database.get_member_ratings(
+            self.guild_id,
+            self.member_id,
+            limit=self.PAGE_SIZE,
+            offset=(page - 1) * self.PAGE_SIZE,
+        )
+        await interaction.response.edit_message(
+            view=MemberRatingsView(
+                self.guild_id,
+                self.member_id,
+                self.member_name,
+                self.owner_id,
+                self.total,
+                rows,
+                page=page,
+            )
+        )
+
+    async def on_previous_page(self, interaction: discord.Interaction):
+        await self._show_page(interaction, self.page - 1)
+
+    async def on_next_page(self, interaction: discord.Interaction):
+        await self._show_page(interaction, self.page + 1)
+
+
+class MusicProfileView(ui.LayoutView):
+    def __init__(
+        self,
+        guild_id: int,
+        member_id: int,
+        member_name: str,
+        owner_id: int,
+        profile_text: str,
+        avatar_url: str,
+        requested_total: int,
+    ):
+        super().__init__(timeout=900)
+        self.guild_id = guild_id
+        self.member_id = member_id
+        self.member_name = member_name
+        self.owner_id = owner_id
+        self.profile_text = profile_text
+        self.avatar_url = avatar_url
+        self.requested_total = requested_total
+
+        requested = ui.Button(
+            label=f"Requested songs ({requested_total})",
+            style=discord.ButtonStyle.secondary,
+            disabled=requested_total == 0,
+        )
+        requested.callback = self.on_requested_songs
+
+        self.add_item(ui.Container(
+            ui.Section(
+                ui.TextDisplay(profile_text),
+                accessory=ui.Thumbnail(media=avatar_url),
+            ),
+            ui.ActionRow(requested),
+        ))
+
+    async def on_requested_songs(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                view=notice("❌ These controls belong to the moderator who ran the command."),
+                ephemeral=True,
+            )
+            return
+        rows = await database.get_member_requested_songs(
+            self.guild_id,
+            self.member_id,
+            limit=MemberRequestedSongsView.PAGE_SIZE,
+            offset=0,
+        )
+        await interaction.response.edit_message(
+            view=MemberRequestedSongsView(
+                self.guild_id,
+                self.member_id,
+                self.member_name,
+                self.owner_id,
+                self.profile_text,
+                self.avatar_url,
+                self.requested_total,
+                rows,
+                page=1,
+            )
+        )
+
+
+class MemberRequestedSongsView(ui.LayoutView):
+    PAGE_SIZE = 10
+
+    def __init__(
+        self,
+        guild_id: int,
+        member_id: int,
+        member_name: str,
+        owner_id: int,
+        profile_text: str,
+        avatar_url: str,
+        total: int,
+        rows: list[dict],
+        page: int = 1,
+    ):
+        super().__init__(timeout=900)
+        self.guild_id = guild_id
+        self.member_id = member_id
+        self.member_name = member_name
+        self.owner_id = owner_id
+        self.profile_text = profile_text
+        self.avatar_url = avatar_url
+        self.total = total
+        self.total_pages = max(1, (total + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+        self.page = max(1, min(page, self.total_pages))
+        self.rows = rows
+
+        previous = ui.Button(label="Previous", style=discord.ButtonStyle.secondary, disabled=self.page <= 1)
+        previous.callback = self.on_previous_page
+        page_label = ui.Button(label=f"Page {self.page}/{self.total_pages}", style=discord.ButtonStyle.secondary, disabled=True)
+        next_page = ui.Button(label="Next", style=discord.ButtonStyle.secondary, disabled=self.page >= self.total_pages)
+        next_page.callback = self.on_next_page
+        back = ui.Button(label="Back to profile", style=discord.ButtonStyle.secondary)
+        back.callback = self.on_back
+
+        self.add_item(ui.Container(
+            ui.TextDisplay(self._render_text()),
+            ui.ActionRow(previous, page_label, next_page, back),
+        ))
+
+    def _render_text(self) -> str:
+        lines = [
+            f"## Requested songs by {self.member_name}",
+            f"**Total requested:** {self.total} · **Page:** {self.page}/{self.total_pages}",
+            "",
+        ]
+        for row in self.rows:
+            artist = f" — {row['artist']}" if row["artist"] else ""
+            status = "playlist" if row.get("synced") else "closed" if row.get("closed") else "open"
+            lines.append(
+                f"• **ID {row['song_number']} · {row['title']}**{artist} · **{status}**"
+            )
+        lines.append(footer_line("Music Profile · Requested Songs"))
+        return "\n".join(lines)
+
+    async def _show_page(self, interaction: discord.Interaction, page: int):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                view=notice("❌ These controls belong to the moderator who ran the command."),
+                ephemeral=True,
+            )
+            return
+        rows = await database.get_member_requested_songs(
+            self.guild_id,
+            self.member_id,
+            limit=self.PAGE_SIZE,
+            offset=(page - 1) * self.PAGE_SIZE,
+        )
+        await interaction.response.edit_message(
+            view=MemberRequestedSongsView(
+                self.guild_id,
+                self.member_id,
+                self.member_name,
+                self.owner_id,
+                self.profile_text,
+                self.avatar_url,
+                self.total,
+                rows,
+                page=page,
+            )
+        )
+
+    async def on_previous_page(self, interaction: discord.Interaction):
+        await self._show_page(interaction, self.page - 1)
+
+    async def on_next_page(self, interaction: discord.Interaction):
+        await self._show_page(interaction, self.page + 1)
+
+    async def on_back(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                view=notice("❌ These controls belong to the moderator who ran the command."),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.edit_message(
+            view=MusicProfileView(
+                self.guild_id,
+                self.member_id,
+                self.member_name,
+                self.owner_id,
+                self.profile_text,
+                self.avatar_url,
+                self.total,
+            )
+        )
 
 
 class SongSearchModal(ui.Modal, title="Search songs"):
@@ -569,33 +848,72 @@ class SongSearchModal(ui.Modal, title="Search songs"):
 
 
 class SongLeaderboardView(ui.LayoutView):
-    def __init__(self, guild_id: int, rows: list[dict], *, min_score: float = 0.0, query: str = None):
+    PAGE_SIZE = 10
+
+    def __init__(
+        self,
+        guild_id: int,
+        rows: list[dict],
+        *,
+        min_score: float = 0.0,
+        query: str = None,
+        page: int = 1,
+    ):
         super().__init__(timeout=900)
         self.guild_id = guild_id
-        self.rows = rows[:25]
+        self.rows = rows
         self.min_score = min_score
         self.query = query
+        self.total_pages = max(1, (len(rows) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+        self.page = max(1, min(page, self.total_pages))
+
         self.select = ui.Select(
             placeholder="Select a track to view details",
             options=[
                 discord.SelectOption(
                     label=(row["title"] or "Unknown Title")[:100],
                     value=str(row["song_number"]),
-                    description=f"ID `{row['song_number']}` · {float(row['avg_score']):.1f}/10 · {row['votes']} votes"[:100],
+                    description=f"ID \x60{row['song_number']}\x60 · {float(row['avg_score']):.1f}/10 · {row['votes']} votes"[:100],
                 )
-                for row in self.rows
+                for row in self.page_rows
             ],
         )
         self.select.callback = self.on_song_selected
 
+        previous = ui.Button(
+            label="Previous",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.page <= 1,
+        )
+        previous.callback = self.on_previous_page
+
+        page_label = ui.Button(
+            label=f"Page {self.page}/{self.total_pages}",
+            style=discord.ButtonStyle.secondary,
+            disabled=True,
+        )
+
+        next_page = ui.Button(
+            label="Next",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.page >= self.total_pages,
+        )
+        next_page.callback = self.on_next_page
+
         search_button = ui.Button(label="Search", style=discord.ButtonStyle.secondary)
         search_button.callback = self.on_search
+
         self.container = ui.Container(
             ui.TextDisplay(self._render_text()),
             ui.ActionRow(self.select),
-            ui.ActionRow(search_button),
+            ui.ActionRow(previous, page_label, next_page, search_button),
         )
         self.add_item(self.container)
+
+    @property
+    def page_rows(self):
+        start = (self.page - 1) * self.PAGE_SIZE
+        return self.rows[start:start + self.PAGE_SIZE]
 
     def _render_text(self, selected: dict = None) -> str:
         title = "MUSIC LEADERBOARD" if not self.query else f"SEARCH RESULTS · {self.query}"
@@ -612,22 +930,40 @@ class SongLeaderboardView(ui.LayoutView):
             lines.extend([
                 "### SELECTED TRACK",
                 f"**{selected['title'] or 'Unknown Title'}**{artist}",
-                f"ID `{selected['song_number']}`  ·  ⭐ **{float(selected['avg_score']):.1f}/10**  ·  **{selected['votes']} votes**",
+                f"ID \x60{selected['song_number']}\x60  ·  ⭐ **{float(selected['avg_score']):.1f}/10**  ·  **{selected['votes']} votes**",
                 f"Posted {format_elapsed(selected['created_at'])}",
                 "",
             ])
 
         lines.append("**RANKINGS**")
-        for index, row in enumerate(self.rows, start=1):
+        first_rank = (self.page - 1) * self.PAGE_SIZE + 1
+        for index, row in enumerate(self.page_rows, start=first_rank):
             artist = f" — {row['artist']}" if row.get("artist") else ""
             title = (row['title'] or 'Unknown Title')[:70]
             rank = f"#{index:02d}"
             lines.append(
-                f"`{rank}` **{title}**{artist}  ·  ID `{row['song_number']}`  ·  "
+                f"\x60{rank}\x60 **{title}**{artist}  ·  ID \x60{row['song_number']}\x60  ·  "
                 f"⭐ **{float(row['avg_score']):.1f}**  ·  {row['votes']} votes"
             )
-        lines.extend(["", footer_line("Server Music Leaderboard")])
+        lines.extend(["", footer_line(f"Server Music Leaderboard · Page {self.page}/{self.total_pages}")])
         return "\n".join(lines)
+
+    async def _show_page(self, interaction: discord.Interaction, page: int):
+        await interaction.response.edit_message(
+            view=SongLeaderboardView(
+                self.guild_id,
+                self.rows,
+                min_score=self.min_score,
+                query=self.query,
+                page=page,
+            )
+        )
+
+    async def on_previous_page(self, interaction: discord.Interaction):
+        await self._show_page(interaction, self.page - 1)
+
+    async def on_next_page(self, interaction: discord.Interaction):
+        await self._show_page(interaction, self.page + 1)
 
     async def on_song_selected(self, interaction: discord.Interaction):
         number = int(self.select.values[0])
