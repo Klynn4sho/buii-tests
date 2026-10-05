@@ -34,6 +34,7 @@ TERMS_URL = f"{LEGAL_URL}#terms"
 
 PAGE_SIZE = 6
 MAX_SEARCH_RESULTS = 25
+PLAYLIST_SYNC_COMMANDS = frozenset({"synctoplaylist", "rebuildplaylist"})
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,7 @@ def build_catalog(bot: commands.Bot) -> dict[str, list[HelpEntry]]:
     entries: dict[str, HelpEntry] = {}
 
     for cmd in bot.commands:
-        if cmd.hidden:
+        if cmd.hidden or (cmd.name in PLAYLIST_SYNC_COMMANDS and not getattr(bot, "spotify_premium", False)):
             continue
         entries[cmd.name] = HelpEntry(
             name=cmd.name,
@@ -88,6 +89,8 @@ def build_catalog(bot: commands.Bot) -> dict[str, list[HelpEntry]]:
         )
 
     for app_cmd in bot.tree.get_commands():
+        if app_cmd.name in PLAYLIST_SYNC_COMMANDS and not getattr(bot, "spotify_premium", False):
+            continue
         existing = entries.get(app_cmd.name)
         if existing:
             existing.slash = True
