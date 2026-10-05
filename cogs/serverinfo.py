@@ -10,7 +10,7 @@ class ServerInfoCog(commands.Cog, name="ServerInfoCog"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="serverinfo", aliases=["server", "guildinfo"], description="Show an overview of this server and its current structure.")
+    @commands.hybrid_command(name="serverinfo", aliases=["si", "server", "guildinfo"], description="Show an overview of this server and its current structure.")
     async def serverinfo(self, ctx: commands.Context):
         guild = ctx.guild
         if guild is None:
