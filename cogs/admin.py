@@ -27,7 +27,7 @@ class AdminCog(commands.Cog, name="AdminCog"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="help", aliases=["h"], description="Browse every command by category, with search.")
+    @commands.hybrid_command(name="help", aliases=["commands", "h"], description="Browse every command by category, with search.")
     async def help_command(self, ctx: commands.Context):
         try:
             if ctx.interaction and not ctx.interaction.response.is_done():
@@ -58,7 +58,7 @@ class AdminCog(commands.Cog, name="AdminCog"):
                     logger.debug("Non-fatal exception suppressed", exc_info=True)
 
     @commands.hybrid_command(
-        name="diagnostics",
+        name="diagnostics", aliases=["diag"],
         description="Show private bot health diagnostics (owner bypass only).",
     )
     async def diagnostics(self, ctx: commands.Context):
@@ -98,7 +98,7 @@ class AdminCog(commands.Cog, name="AdminCog"):
         await ctx.send(view=SimpleLayout(text), ephemeral=bool(ctx.interaction))
 
 
-    @commands.hybrid_command(name="storage", aliases=["dbstatus"], description="Show private persistent-storage status (owner bypass only).")
+    @commands.hybrid_command(name="storage", aliases=["db", "dbstatus"], description="Show private persistent-storage status (owner bypass only).")
     async def storage(self, ctx: commands.Context):
         if not BYPASS_USER_ID or ctx.author.id != BYPASS_USER_ID:
             await ctx.send(view=notice("❌ This storage command is restricted."), ephemeral=bool(ctx.interaction))
@@ -115,7 +115,7 @@ class AdminCog(commands.Cog, name="AdminCog"):
         await ctx.send(view=SimpleLayout(text), ephemeral=bool(ctx.interaction))
 
 
-    @commands.hybrid_command(name="sync", description="Synchronize slash commands for this server.")
+    @commands.hybrid_command(name="sync", aliases=["sy"], description="Synchronize slash commands for this server.")
     @commands.has_permissions(administrator=True)
     @commands.cooldown(rate=1, per=60.0, type=commands.BucketType.guild)
     async def sync_commands(self, ctx: commands.Context, option: str = None):
