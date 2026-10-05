@@ -12,14 +12,16 @@ change made from the dashboard calls the identical `_raw_set_*` function
 the dashboard can never drift out of sync with each other.
 """
 
+import csv
 import functools
+import io
 import logging
 import re
 import secrets
 from urllib.parse import quote
 
 import requests
-from flask import Blueprint, current_app, jsonify, redirect, request, session
+from flask import Blueprint, Response, current_app, jsonify, redirect, request, session
 
 from core import database
 from core.config import DASHBOARD_REQUIRED_PERMS, SPOTIFY_PLAYLIST_ID
@@ -29,6 +31,13 @@ from web.commands_manifest import COMMANDS, CATEGORY_LABELS
 bp = Blueprint("api", __name__)
 logger = logging.getLogger(__name__)
 SNOWFLAKE_RE = re.compile(r"^[0-9]{17,20}$")
+
+
+PLAYLIST_SYNC_COMMANDS = frozenset({"synctoplaylist", "rebuildplaylist"})
+
+
+def spotify_premium_enabled():
+    return bool(getattr(current_app.bot, "spotify_premium", False))
 
 
 def _parse_optional_snowflake(value, field_name):
@@ -211,6 +220,66 @@ def guild_growth(guild_id):
     return jsonify({"days": [{"date": d.isoformat(), "joins": c} for d, c in series]})
 
 
+@bp.route("/api/guilds/<guild_id>/analytics")
+@guild_access_required
+def guild_analytics(guild_id):
+    data = database._raw_get_analytics_insights(int(guild_id))
+    growth = data["growth"] or {}
+    retention = data["retention"] or {}
+    returning = data["returning"] or {}
+    queue = data["queue"] or {}
+    ratings = data["ratings"] or {}
+    telemetry = database._raw_get_dashboard_telemetry(int(guild_id))
+    sync_summary = database._raw_get_music_sync_summary(int(guild_id))
+    command_totals = telemetry["commands"] or {}
+    sync = telemetry["sync"] or {}
+    return jsonify({
+        "growth": {
+            "current_joins": int(growth.get("current_joins") or 0),
+            "previous_joins": int(growth.get("previous_joins") or 0),
+            "tracked_invites": int(growth.get("tracked_invites") or 0),
+        },
+        "retention": {
+            "mature_joins": int(growth.get("mature_joins") or 0),
+            "retained_joins": int(retention.get("retained_joins") or 0),
+            "returning_members": int(returning.get("returning_members") or 0),
+        },
+        "risk": {
+            "new_account": int(growth.get("new_account_risk") or 0),
+            "ambiguous_invites": int(growth.get("ambiguous_invites") or 0),
+        },
+        "queue": {
+            "open_songs": int(queue.get("open_songs") or 0),
+            "awaiting_preview": int(queue.get("awaiting_preview") or 0),
+        },
+        "ratings": {
+            "low": int(ratings.get("low") or 0),
+            "below_average": int(ratings.get("below_average") or 0),
+            "average": int(ratings.get("average") or 0),
+            "good": int(ratings.get("good") or 0),
+            "excellent": int(ratings.get("excellent") or 0),
+            "total": int(ratings.get("total") or 0),
+        },
+        "sync_summary": sync_summary if spotify_premium_enabled() else {},
+        "spotify_premium": spotify_premium_enabled(),
+        "telemetry": {
+            "commands_today": int(command_totals.get("commands_today") or 0),
+            "command_errors": int(command_totals.get("command_errors") or 0),
+            "most_used_command": telemetry["most_used"].get("name") if telemetry["most_used"] else None,
+            "sync_failures": int(sync.get("sync_failures") or 0),
+            "sync_attempts": int(sync.get("sync_attempts") or 0),
+            "admin_events": [
+                {"name": row["name"], "details": row["details"], "created_at": row["created_at"].isoformat()}
+                for row in telemetry["admin_events"]
+            ],
+            "providers": [
+                {"source": row["source"], "songs": int(row["songs"]), "synced": int(row["synced"] or 0)}
+                for row in telemetry["providers"]
+            ],
+        },
+    })
+
+
 @bp.route("/api/guilds/<guild_id>/leaderboard")
 @guild_access_required
 def guild_leaderboard(guild_id):
@@ -280,14 +349,43 @@ def guild_music_insights(guild_id):
              "last_requested": r["last_requested"].isoformat() if r["last_requested"] else None}
             for r in data["requesters"]
         ],
-        "sync": {
+        "spotify_premium": spotify_premium_enabled(),
+        "sync": ({
             "playlist_configured": bool(SPOTIFY_PLAYLIST_ID),
             "total": int(sync.get("total") or 0),
             "synced": int(sync.get("synced") or 0),
             "pending": int(sync.get("pending") or 0),
             "last_added": sync.get("last_added").isoformat() if sync.get("last_added") else None,
-        },
+        } if spotify_premium_enabled() else {}),
     })
+
+
+@bp.route("/api/guilds/<guild_id>/exports/<kind>")
+@guild_access_required
+def guild_export(guild_id, kind):
+    if kind not in {"joins", "songs", "activity"}:
+        return jsonify({"error": "Unknown export type"}), 404
+    gid = int(guild_id)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    if kind == "joins":
+        rows = database._raw_get_joins_in_range(gid, limit=10000, newest_first=False)
+        writer.writerow(["user_id", "user_name", "inviter_name", "invite_code", "join_date", "account_age_days"])
+        writer.writerows(rows)
+    elif kind == "songs":
+        rows = database._raw_get_music_log(gid, limit=10000)
+        writer.writerow(["id", "song_number", "title", "artist", "source", "requested_by", "created_at", "synced", "closed"])
+        for row in rows:
+            writer.writerow([row["id"], row["song_number"], row["title"], row["artist"], row["source"],
+                             row["requested_by_name"], row["created_at"], row["synced"], row["closed"]])
+    else:
+        rows = database._raw_get_dashboard_telemetry(gid)["admin_events"]
+        writer.writerow(["event_type", "name", "success", "details", "created_at"])
+        for row in rows:
+            writer.writerow([row["event_type"], row["name"], row["success"], row["details"], row["created_at"]])
+    response = Response(buffer.getvalue(), mimetype="text/csv")
+    response.headers["Content-Disposition"] = f"attachment; filename=buii-{kind}-{gid}.csv"
+    return response
 
 
 @bp.route("/api/guilds/<guild_id>/config")
@@ -387,6 +485,11 @@ def patch_config(guild_id):
     if not updated:
         return jsonify({"error": "No recognized fields in request body."}), 400
 
+    actor = (session.get("user") or {}).get("username", "dashboard user")
+    for field in updated:
+        database._raw_record_dashboard_event(
+            gid, "admin", field, True, details=f"{actor} changed {field}"
+        )
     return jsonify({"updated": updated})
 
 
@@ -397,7 +500,11 @@ def patch_config(guild_id):
 @bp.route("/api/commands")
 @login_required
 def commands_list():
-    return jsonify({"commands": COMMANDS, "categories": CATEGORY_LABELS})
+    commands = [
+        command for command in COMMANDS
+        if spotify_premium_enabled() or command["name"] not in PLAYLIST_SYNC_COMMANDS
+    ]
+    return jsonify({"commands": commands, "categories": CATEGORY_LABELS})
 
 
 # ======================================================================
