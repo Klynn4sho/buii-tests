@@ -153,12 +153,40 @@ class BuiiBot(commands.Bot):
         if self.http_session is None:
             self.http_session = aiohttp.ClientSession()
 
+        # Spotify playlist endpoints are available only when the configured
+        # Spotify user account is Premium. Cache this capability once at
+        # startup so the bot and dashboard expose the same feature state.
+        from core.music_utils import spotify_account_is_premium
+        try:
+            self.spotify_premium = await spotify_account_is_premium(self.http_session)
+        except Exception:
+            logger.exception("Spotify Premium capability check failed")
+            self.spotify_premium = False
+        logger.info("Spotify playlist sync capability: %s", "enabled" if self.spotify_premium else "hidden")
+
         for extension in EXTENSIONS:
             try:
                 await self.load_extension(extension)
                 logger.info("Loaded extension: %s", extension)
-            except Exception:
+            except Exception as error:
                 logger.exception("Failed to load extension: %s", extension)
+                # AdminCog owns /help and /sync. Do not let the bot appear
+                # healthy while the primary command directory is missing.
+                if extension == "cogs.admin":
+                    raise RuntimeError(
+                        "Critical extension cogs.admin failed to load; refusing to start"
+                    ) from error
+
+        if not self.spotify_premium:
+            # Keep the implementation loaded for a future Premium account,
+            # but remove sync commands from both local help and Discord's
+            # registered application-command surface while unavailable.
+            hidden_playlist_commands = {"synctoplaylist", "rebuildplaylist"}
+            for command in self.commands:
+                if command.name in hidden_playlist_commands:
+                    command.hidden = True
+            for command_name in hidden_playlist_commands:
+                self.tree.remove_command(command_name)
 
         self.audit_command_surface()
 
@@ -242,7 +270,20 @@ def _command_hint_view(title: str, body: str, run_label: str | None = None,
 
 
 @bot.event
+async def on_command_completion(ctx: commands.Context):
+    if ctx.guild:
+        asyncio.create_task(database.async_record_dashboard_event(
+            ctx.guild.id, "command", getattr(ctx.command, "qualified_name", "unknown"), True
+        ))
+
+
+@bot.event
 async def on_command_error(ctx: commands.Context, error: commands.CommandError):
+    if ctx.guild:
+        asyncio.create_task(database.async_record_dashboard_event(
+            ctx.guild.id, "command", getattr(ctx.command, "qualified_name", None) or getattr(ctx, "invoked_with", None) or "unknown", False,
+            details=type(error).__name__,
+        ))
     if isinstance(error, commands.CommandNotFound):
         attempted = getattr(error, "command_name", None) or ctx.invoked_with or "that command"
         names = [command.name for command in bot.commands if not command.hidden]
@@ -256,16 +297,26 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
                 if interaction.user.id != ctx.author.id:
                     await interaction.response.send_message(view=notice("❌ This suggestion belongs to the person who ran the command."), ephemeral=True)
                     return
-                await interaction.response.defer()
+                await interaction.response.defer(thinking=True)
                 try:
-                    await ctx.invoke(target)
-                except Exception as invoke_error:
-                    await on_command_error(ctx, invoke_error)
-                view.run_button.disabled = True
-                try:
-                    await interaction.edit_original_response(view=view)
+                    await asyncio.wait_for(ctx.invoke(target), timeout=25)
+                except asyncio.TimeoutError:
+                    await interaction.followup.send(
+                        view=notice("⚠️ That command took too long to finish. Please try it directly."),
+                        ephemeral=True,
+                    )
                 except Exception:
-                    logger.debug("Could not disable the command suggestion button after use", exc_info=True)
+                    logger.exception("Suggested command failed: %s", target.qualified_name)
+                    await interaction.followup.send(
+                        view=notice("❌ The suggested command failed. Please try it directly."),
+                        ephemeral=True,
+                    )
+                finally:
+                    view.run_button.disabled = True
+                    try:
+                        await interaction.edit_original_response(view=view)
+                    except Exception:
+                        logger.debug("Could not disable the command suggestion button after use", exc_info=True)
 
             view = _command_hint_view(
                 f"Command `{attempted}` does not exist",
@@ -279,7 +330,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
                 f"Command `{attempted}` does not exist",
                 f"Try `{prefix}help` to see every available command.",
             )
-        await ctx.send(view=view)
+        await ctx.send(view=view, ephemeral=bool(ctx.interaction))
         return
 
     if isinstance(error, commands.MissingRequiredArgument):
@@ -290,7 +341,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
             f"{command.description or command.short_doc or 'View command details.'}\n"
             f"-# Syntax: `{prefix}{command.qualified_name} {signature}` | `/{command.qualified_name} {signature}`"
         )
-        await ctx.send(view=_command_hint_view(command.qualified_name, body))
+        await ctx.send(view=_command_hint_view(command.qualified_name, body), ephemeral=bool(ctx.interaction))
         return
 
     if isinstance(error, commands.CommandInvokeError):
@@ -312,9 +363,10 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
         text = f"⏱️ That command is on cooldown. Try again in {error.retry_after:.1f}s."
     else:
         reference = _error_reference()
-        logger.exception(
+        logger.error(
             "Unhandled command error ref=%s in %r (%s / %s)",
             reference, ctx.command, ctx.guild, ctx.author,
+            exc_info=(type(error), error, getattr(error, "__traceback__", None)),
         )
         if _is_bypass_user(ctx.author.id):
             text = (
@@ -325,7 +377,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
             text = "❌ Something went wrong running that command. The error was logged."
 
     try:
-        await ctx.send(view=notice(text))
+        await ctx.send(view=notice(text), ephemeral=bool(ctx.interaction))
     except Exception:
         logger.debug("Could not send command error response", exc_info=True)
 
@@ -342,7 +394,12 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         message = f"⏱️ That command is on cooldown. Try again in {error.retry_after:.1f}s."
     else:
         reference = _error_reference()
-        logger.exception("Unhandled app command error ref=%s in %r", reference, interaction.command)
+        logger.error(
+            "Unhandled app command error ref=%s in %r",
+            reference,
+            interaction.command,
+            exc_info=(type(error), error, getattr(error, "__traceback__", None)),
+        )
         if _is_bypass_user(interaction.user.id):
             message = (
                 "❌ Something went wrong running that command. "
