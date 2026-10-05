@@ -15,6 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 import asyncio
+import re
 from datetime import datetime, timezone, timedelta
 
 import discord
@@ -22,19 +23,19 @@ from discord import app_commands, ui
 from discord.ext import commands, tasks
 
 from core import database
-from core.checks import has_mod_permission
+from core.checks import has_mod_permission, has_admin_permission
 from core.config import (
     RATING_WINDOW_HOURS,
-    SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN,
-    SPOTIFY_PLAYLIST_ID,
+    SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_USER_TOKEN, SPOTIFY_REFRESH_TOKEN,
+    SPOTIFY_PLAYLIST_ID, MUSIC_GUILD_ID,
 )
 from core.components import SimpleLayout, Layout, footer_line, notice
 from core.helpers import create_music_card, format_elapsed
 from core.music_utils import (
     find_music_link, fetch_song_metadata, search_song_metadata,
-    lookup_song_genre, sync_to_spotify, remove_from_spotify,
+    lookup_song_genre, sync_to_spotify, remove_from_spotify, spotify_playlist_tracks,
 )
-from views.music_views import RatingView, ClosedRatingView, RenumberConfirmView, SongLeaderboardView
+from views.music_views import RatingView, ClosedRatingView, RenumberConfirmView, SongLeaderboardView, MemberRatingsView, MusicProfileView
 
 
 class MusicCog(commands.Cog, name="MusicCog"):
@@ -55,6 +56,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
                 row["guild_id"], row["id"], row["song_number"],
                 url=row["url"],
                 preview_used=bool(row["preview_used"]),
+                playlist_visible=bool(getattr(self.bot, "spotify_premium", False)),
             ))
 
     def cog_unload(self):
@@ -86,8 +88,11 @@ class MusicCog(commands.Cog, name="MusicCog"):
                     requester_name=song["requested_by_name"], avg=avg, count=count,
                     preview_url=song["preview_url"], url=song["url"], card_file=card_file,
                     accent_rgb=dominant_rgb,
-                    ping_text=(f"<@{song['requested_by_id']}>" if song.get("requested_by_id") else None),
+                    # This is an edit of an existing card, so do not
+                    # reintroduce a requester mention and notify them again.
+                    ping_text=None,
                     preview_used=bool(song.get("preview_used")),
+                    playlist_visible=bool(getattr(self.bot, "spotify_premium", False)),
                 )
             await message.edit(view=view, attachments=[card_file])
         except Exception:
@@ -97,7 +102,44 @@ class MusicCog(commands.Cog, name="MusicCog"):
     async def on_ready(self):
         if not self._ready_once:
             self._ready_once = True
+            try:
+                await self.reconcile_playlist_state()
+            except Exception:
+                logger.exception("[music] startup playlist reconciliation failed")
+            try:
+                await self.close_expired_songs()
+            except Exception:
+                logger.exception("[music] startup expiry recovery failed")
             self.expiry_sweep_loop.start()
+
+    async def reconcile_playlist_state(self):
+        """Mark database songs that are already present in the configured playlist."""
+        if not SPOTIFY_PLAYLIST_ID or not getattr(self.bot, "spotify_premium", False):
+            return
+        rows = await database.get_unsynced_spotify_songs(MUSIC_GUILD_ID)
+        playlist_tracks = await spotify_playlist_tracks(self.bot.http_session)
+        if playlist_tracks is None:
+            return
+        playlist_ids = {track["id"] for track in playlist_tracks}
+        playlist_keys = {
+            re.sub(r"[^a-z0-9]+", " ", f"{track['artist']} {track['title']}".casefold()).strip()
+            for track in playlist_tracks
+        }
+        matched = 0
+        for row in rows:
+            track_id = (row["url"] or "").split("spotify.com/track/", 1)[-1].split("?", 1)[0]
+            song_key = re.sub(
+                r"[^a-z0-9]+", " ",
+                f"{row.get('artist') or ''} {row.get('title') or ''}".casefold(),
+            ).strip()
+            if track_id in playlist_ids or song_key in playlist_keys:
+                if not row.get("synced"):
+                    await database.mark_song_synced(MUSIC_GUILD_ID, row["id"])
+                matched += 1
+        await asyncio.to_thread(
+            database._raw_set_playlist_sync_state,
+            MUSIC_GUILD_ID, len(playlist_ids), matched,
+        )
 
     async def sync_qualifying_locked_song(self, guild_id: int, song_id: int):
         """Sync only songs that finished the normal 12-hour rating window."""
@@ -110,15 +152,19 @@ class MusicCog(commands.Cog, name="MusicCog"):
             return False
 
         average, votes = await database.get_song_stats(guild_id, song_id)
-        if votes <= 4 or average < 7.0:
+        if votes < 4 or average < 7.0:
             return False
 
         # Prevent concurrent expiry/manual syncs from adding the same track twice.
         async with self.spotify_sync_lock:
+            if not getattr(self.bot, "spotify_premium", False):
+                return False
             latest = await database.get_song(guild_id, song_id)
             if not latest or latest.get("synced"):
                 return False
-            if await sync_to_spotify(self.bot.http_session, latest["url"]):
+            sync_success = await sync_to_spotify(self.bot.http_session, latest["url"])
+            await database.async_record_dashboard_event(guild_id, "sync", "spotify", sync_success)
+            if sync_success:
                 await database.mark_song_synced(guild_id, song_id)
                 return True
         return False
@@ -126,14 +172,18 @@ class MusicCog(commands.Cog, name="MusicCog"):
     # ------------------------------------------------------------------
     # Background loop: auto-close any song whose rating window has elapsed
     # ------------------------------------------------------------------
+    async def close_expired_songs(self):
+        """Recover overdue open songs immediately after startup and on schedule."""
+        expired = await database.get_expired_open_songs()
+        for row in expired:
+            await database.close_song(row["guild_id"], row["id"])
+            await self.sync_qualifying_locked_song(row["guild_id"], row["id"])
+            await self.refresh_song_message(row["guild_id"], row["id"])
+
     @tasks.loop(seconds=600)
     async def expiry_sweep_loop(self):
         try:
-            expired = await database.get_expired_open_songs()
-            for row in expired:
-                await database.close_song(row["guild_id"], row["id"])
-                await self.sync_qualifying_locked_song(row["guild_id"], row["id"])
-                await self.refresh_song_message(row["guild_id"], row["id"])
+            await self.close_expired_songs()
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -157,7 +207,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         artist = f" — {existing['artist']}" if existing.get("artist") else ""
         text = (
             "## Already posted\n"
-            f"{requester.mention}\n"
+            f"Posted by **{requester.display_name}**\n"
             f"**{title}**{artist}\n"
             f"⭐ **{avg:.1f}/10** · {count} votes"
         )
@@ -169,7 +219,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         items.append(ui.TextDisplay(footer_line("Duplicate detected")))
         await channel.send(
             view=Layout(*items),
-            allowed_mentions=discord.AllowedMentions(users=True),
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     async def temp_lock_channel(self, channel: discord.TextChannel, duration: int):
@@ -189,6 +239,8 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
     async def post_song(self, channel, source, url, title, artist, requester: discord.abc.User,
                          guild_id: int, channel_id: int, cover_url=None, preview_url=None):
+        if not guild_id:
+            return None
         if not preview_url and title:
             q = f"{artist} {title}" if artist else title
             _, _, fallback_cover, _, fallback_preview = await search_song_metadata(self.bot.http_session, q)
@@ -247,11 +299,13 @@ class MusicCog(commands.Cog, name="MusicCog"):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
+        # Music submissions are enabled in every server. Per-server channel,
+        # role, lock, and song rows are resolved from the message guild.
 
         source, url = find_music_link(message.content)
         if source:
             _, _, music_channel_id = await database.async_get_music_config(message.guild.id)
-            if music_channel_id and str(message.channel.id) == str(music_channel_id):
+            if not music_channel_id or str(message.channel.id) == str(music_channel_id):
                 title, artist, cover_url, preview_url = await fetch_song_metadata(self.bot.http_session, source, url)
                 await self.post_song(message.channel, source, url, title, artist, message.author,
                                       message.guild.id, message.channel.id, cover_url, preview_url)
@@ -259,7 +313,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
     # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
-    @commands.hybrid_command(name="songratings", aliases=["who-rated", "songvotes"], description="Check individual member ratings for a specific song ID.")
+    @commands.hybrid_command(name="songratings", aliases=["sr", "who-rated", "songvotes"], description="Check individual member ratings for a specific song ID.")
     @has_mod_permission()
     async def songratings(self, ctx: commands.Context, song_id: int):
         song = await database.get_song_by_number(ctx.guild.id, song_id)
@@ -275,8 +329,8 @@ class MusicCog(commands.Cog, name="MusicCog"):
         lines = []
         for row in rows:
             member = ctx.guild.get_member(row["user_id"]) if ctx.guild else None
-            user_mention = member.mention if member else f"<@{row['user_id']}>"
-            lines.append(f"• {user_mention} — Score: **{row['score']}/10**")
+            display_name = member.display_name if member else f"User {row['user_id']}"
+            lines.append(f"• **{display_name}** — Score: **{row['score']}/10**")
 
         avg, count = await database.get_song_stats(ctx.guild.id, song["id"])
         artist_str = f" by **{song['artist']}**" if song['artist'] else ""
@@ -286,9 +340,86 @@ class MusicCog(commands.Cog, name="MusicCog"):
             f"**Song ID:** `{song_id}` | **Overall:** ⭐ **{avg:.1f}/10** ({count} votes)\n\n"
             + "\n".join(lines) + "\n" + footer_line("Admin Rating Inspector")
         )
-        await ctx.send(view=SimpleLayout(text), ephemeral=True)
+        await ctx.send(
+            view=SimpleLayout(text),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
-    @commands.hybrid_command(name="closevoting", description="Freeze a song's score so no new votes can be cast.")
+    @commands.hybrid_command(name="memberratings", aliases=["mr", "userratings", "ratingsby"], description="Show every rating submitted by a member.")
+    @has_mod_permission()
+    @app_commands.describe(member="Member to inspect (defaults to you)", page="Page number")
+    async def memberratings(self, ctx: commands.Context, member: discord.Member = None, page: int = 1):
+        member = member or ctx.author
+        page_size = 15
+        total = await database.count_member_ratings(ctx.guild.id, member.id)
+        if not total:
+            await ctx.send(view=notice(f"❌ **{member.display_name}** has not rated any songs in this server."), ephemeral=True)
+            return
+        page = max(1, min(int(page), (total + page_size - 1) // page_size))
+        rows = await database.get_member_ratings(
+            ctx.guild.id, member.id, limit=page_size, offset=(page - 1) * page_size
+        )
+        lines = []
+        for row in rows:
+            artist = f" — {row['artist']}" if row["artist"] else ""
+            lines.append(
+                f"• **ID {row['song_number']} · {row['title']}**{artist} — **{row['score']}/10**"
+            )
+        text = (
+            f"## Ratings by {member.display_name}\n"
+            f"**Total ratings:** {total} · **Page:** {page}/{(total + page_size - 1) // page_size}\n\n"
+            + "\n".join(lines)
+            + "\n"
+            + footer_line("Member Rating Inspector")
+        )
+        await ctx.send(
+            view=MemberRatingsView(
+                ctx.guild.id,
+                member.id,
+                member.display_name,
+                ctx.author.id,
+                total,
+                rows,
+                page=page,
+            ),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @commands.hybrid_command(name="voteblacklist", aliases=["vbl"], description="Block or unblock a member from submitting music ratings.")
+    @has_mod_permission()
+    @app_commands.describe(member="Member to block/unblock, or leave empty to list blocked members", remove="Remove the member from the blacklist")
+    async def voteblacklist(self, ctx: commands.Context, member: discord.Member = None, remove: bool = False):
+        if member is None:
+            rows = await database.get_vote_blacklist(ctx.guild.id)
+            if not rows:
+                await ctx.send(view=notice("✅ The vote blacklist is empty."), ephemeral=True)
+                return
+            lines = []
+            for user_id, _created_at in rows:
+                blocked_member = ctx.guild.get_member(int(user_id))
+                label = blocked_member.mention if blocked_member else f"<@{user_id}>"
+                lines.append(f"• {label}")
+            await ctx.send(
+                view=SimpleLayout("## 🚫 Vote Blacklist\n" + "\n".join(lines)),
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return
+
+        await database.set_vote_blacklist(ctx.guild.id, member.id, blocked=not remove)
+        if remove:
+            text = f"✅ {member.mention} can submit music ratings again."
+        else:
+            text = f"🚫 {member.mention} is now blocked from submitting music ratings."
+        await ctx.send(
+            view=SimpleLayout(text),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @commands.hybrid_command(name="closevoting", aliases=["cv"], description="Freeze a song's score so no new votes can be cast.")
     @has_mod_permission()
     async def closevoting(self, ctx: commands.Context, song_id: int):
         song = await database.get_song_by_number(ctx.guild.id, song_id)
@@ -314,21 +445,30 @@ class MusicCog(commands.Cog, name="MusicCog"):
         )
         await ctx.send(view=SimpleLayout(text))
 
-    @commands.hybrid_command(name="spotify", aliases=["spotify_status", "spotifyinfo"], description="Show Spotify integration status without exposing secrets.")
+    @commands.hybrid_command(name="spotify", aliases=["sinfo", "spotify_status", "spotifyinfo"], description="Show Spotify integration status without exposing secrets.")
     @has_mod_permission()
     async def spotify_status(self, ctx: commands.Context):
         configured = {
             "Client ID": bool(SPOTIFY_CLIENT_ID),
             "Client secret": bool(SPOTIFY_CLIENT_SECRET),
             "Refresh token": bool(SPOTIFY_REFRESH_TOKEN),
+            "User token": bool(SPOTIFY_USER_TOKEN),
             "Playlist ID": bool(SPOTIFY_PLAYLIST_ID),
         }
-        ready = all(configured.values())
+        premium = bool(getattr(self.bot, "spotify_premium", False))
+        can_read = premium and bool(SPOTIFY_PLAYLIST_ID) and (
+            bool(SPOTIFY_REFRESH_TOKEN or SPOTIFY_USER_TOKEN)
+            or bool(SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET)
+        )
+        can_modify = premium and bool(SPOTIFY_PLAYLIST_ID and (SPOTIFY_REFRESH_TOKEN or SPOTIFY_USER_TOKEN))
         lines = [
             "## SPOTIFY STATUS",
-            f"**Integration** · {'✅ Ready' if ready else '⚠️ Incomplete configuration'}",
-            f"**Authorization** · {'✅ Refresh-token flow enabled' if SPOTIFY_REFRESH_TOKEN else '❌ Refresh token missing'}",
+            f"**Integration** · {'✅ Ready' if can_modify else '⚠️ Read-only or incomplete'}",
+            f"**Authorization** · {'✅ Playlist editing enabled' if can_modify else '⚠️ Playlist editing token missing'}",
+            f"**Playlist read** · {'✅ Available' if can_read else '❌ No usable Spotify credentials'}",
+            f"**Premium access** · {'✅ Active' if premium else '❌ Required for playlist sync'}",
             f"**Playlist** · {'✅ Configured' if SPOTIFY_PLAYLIST_ID else '❌ Playlist ID missing'}",
+            "⚠️ Spotify playlist API access may require an active Premium subscription for the app owner.",
             "",
             "**Configuration checks**",
         ]
@@ -338,19 +478,25 @@ class MusicCog(commands.Cog, name="MusicCog"):
         )
         lines.extend([
             "",
-            f"**Sync rules** · locked for {RATING_WINDOW_HOURS}h · more than 4 votes · average ≥ 7.0",
+            f"**Sync rules** · locked for {RATING_WINDOW_HOURS}h · at least 4 votes · average ≥ 7.0",
             "-# Access and refresh tokens are never displayed.",
             footer_line("Spotify Integration"),
         ])
         spotify_view = SimpleLayout("\n".join(lines))
-        if ctx.interaction:
-            await ctx.send(view=spotify_view, ephemeral=True)
-        else:
-            await ctx.send(view=spotify_view)
+        await ctx.send(
+            view=spotify_view,
+            ephemeral=bool(getattr(ctx, "interaction", None)),
+        )
 
-    @commands.hybrid_command(name="synctoplaylist", description="Sync a locked, qualifying song to the Spotify playlist.")
+    @commands.hybrid_command(name="synctoplaylist", aliases=["stp", "syncsong"], description="Sync a locked, qualifying song to the Spotify playlist.")
     @has_mod_permission()
     async def synctoplaylist(self, ctx: commands.Context, song_id: int):
+        if not getattr(self.bot, "spotify_premium", False):
+            await ctx.send(view=notice("❌ Spotify playlist sync is unavailable because the configured account is not Premium."), ephemeral=True)
+            return
+        if ctx.guild.id != MUSIC_GUILD_ID:
+            await ctx.send(view=notice("❌ Playlist sync is enabled only in the configured music server."), ephemeral=True)
+            return
         song = await database.get_song_by_number(ctx.guild.id, song_id)
         if not song:
             await ctx.send(view=notice(f"❌ Song ID `{song_id}` not found."), ephemeral=True)
@@ -367,11 +513,11 @@ class MusicCog(commands.Cog, name="MusicCog"):
         is_locked = bool(song.get("closed")) and created_at and (
             datetime.now(timezone.utc) - created_at >= timedelta(hours=RATING_WINDOW_HOURS)
         )
-        if not is_locked or votes <= 4 or average < 7.0:
+        if not is_locked or votes < 4 or average < 7.0:
             await ctx.send(
                 view=notice(
                     f"❌ This song is not eligible yet. It must be locked after {RATING_WINDOW_HOURS} hours, "
-                    f"have more than 4 votes, and average at least 7.0/10. "
+                    f"have at least 4 votes, and average at least 7.0/10. "
                     f"Current: {average:.1f}/10 ({votes} votes)."
                 ),
                 ephemeral=True,
@@ -380,6 +526,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
 
         await ctx.defer(ephemeral=True)
         success = await sync_to_spotify(self.bot.http_session, song["url"])
+        await database.async_record_dashboard_event(ctx.guild.id, "sync", "spotify", success)
         if success:
             await database.mark_song_synced(ctx.guild.id, song["id"])
             await self.refresh_song_message(ctx.guild.id, song["id"])
@@ -397,21 +544,115 @@ class MusicCog(commands.Cog, name="MusicCog"):
             )
 
     @commands.hybrid_command(
-        name="musicprofile",
-        aliases=["myratings"],
+        name="rebuildplaylist", aliases=["rpl"],
+        description="Remove the current playlist tracks and rebuild it from qualifying server songs.",
+    )
+    @has_admin_permission()
+    async def rebuildplaylist(self, ctx: commands.Context):
+        if not getattr(self.bot, "spotify_premium", False):
+            await ctx.send(view=notice("❌ Spotify playlist sync is unavailable because the configured account is not Premium."), ephemeral=True)
+            return
+        stage = "starting"
+        try:
+            if ctx.guild.id != MUSIC_GUILD_ID:
+                await ctx.send(view=notice("❌ Playlist rebuild is enabled only in the configured music server."), ephemeral=True)
+                return
+            if not SPOTIFY_PLAYLIST_ID:
+                await ctx.send(view=notice("❌ No Spotify playlist is configured."), ephemeral=True)
+                return
+
+            await ctx.defer(ephemeral=True)
+            stage = "reading the Spotify playlist"
+            playlist_tracks = await spotify_playlist_tracks(self.bot.http_session)
+            if playlist_tracks is None:
+                await ctx.send(
+                    view=notice("❌ I couldn't read the configured Spotify playlist. Check the playlist access token and playlist ID."),
+                    ephemeral=True,
+                )
+                return
+
+            removed = 0
+            remove_failures = 0
+            stage = "removing existing playlist tracks"
+            for track in playlist_tracks:
+                track_url = f"https://open.spotify.com/track/{track['id']}"
+                if await remove_from_spotify(self.bot.http_session, track_url):
+                    removed += 1
+                else:
+                    remove_failures += 1
+
+            stage = "loading catalog songs"
+            candidates = await database.get_unsynced_spotify_songs(MUSIC_GUILD_ID)
+            for row in candidates:
+                await database.unmark_song_synced(MUSIC_GUILD_ID, row["id"])
+
+            added = 0
+            rejected = 0
+            add_failures = 0
+            stage = "adding qualifying songs"
+            for row in candidates:
+                song = await database.get_song(MUSIC_GUILD_ID, row["id"])
+                if not song or not song.get("closed"):
+                    rejected += 1
+                    continue
+                created_at = song.get("created_at")
+                if isinstance(created_at, str):
+                    created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                if created_at and created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                if not created_at or datetime.now(timezone.utc) - created_at < timedelta(hours=RATING_WINDOW_HOURS):
+                    rejected += 1
+                    continue
+                average, votes = await database.get_song_stats(MUSIC_GUILD_ID, row["id"])
+                if votes < 4 or average < 7.0:
+                    rejected += 1
+                    continue
+                if await sync_to_spotify(self.bot.http_session, row["url"]):
+                    await database.mark_song_synced(MUSIC_GUILD_ID, row["id"])
+                    added += 1
+                else:
+                    add_failures += 1
+
+            stage = "refreshing dashboard sync counts"
+            await self.reconcile_playlist_state()
+            await ctx.send(
+                view=SimpleLayout(
+                    "## ✅ Playlist rebuilt\n"
+                    f"Removed existing tracks: **{removed}**\n"
+                    f"Added qualifying bot tracks: **{added}**\n"
+                    f"Skipped non-qualifying songs: **{rejected}**\n"
+                    f"Removal failures: **{remove_failures}** · Add failures: **{add_failures}**\n"
+                    + footer_line("Spotify Playlist Rebuild")
+                ),
+                ephemeral=True,
+            )
+        except Exception:
+            logger.exception("[music] playlist rebuild failed during %s", stage)
+            try:
+                await ctx.send(
+                    view=notice(f"❌ Playlist rebuild failed while {stage}. The error was logged."),
+                    ephemeral=True,
+                )
+            except Exception:
+                logger.debug("Could not send playlist rebuild failure response", exc_info=True)
+
+
+    @commands.hybrid_command(
+        name="musicprofile", aliases=["mp", "myratings"],
         description="View your music profile, or another member's profile.",
     )
     @app_commands.describe(member="The member whose music profile you want to view")
     async def musicprofile(self, ctx: commands.Context, member: discord.Member = None):
         target = member or ctx.author
         stats, top_rated = await database.get_user_stats(ctx.guild.id, target.id)
-        if not stats or stats["total"] == 0:
+        requested_total = await database.count_member_requested_songs(ctx.guild.id, target.id)
+        if (not stats or stats["total"] == 0) and requested_total == 0:
             owner = "You haven't" if target.id == ctx.author.id else f"{target.display_name} hasn't"
-            await ctx.send(view=notice(f"❌ {owner} rated any songs in this server yet!"), ephemeral=True)
+            await ctx.send(view=notice(f"❌ {owner} rated or requested any songs in this server yet!"), ephemeral=True)
             return
 
-        avg_score = stats["avg_given"] or 0.0
-        total_votes = stats["total"]
+        avg_score = (stats["avg_given"] or 0.0) if stats else 0.0
+        total_votes = stats["total"] if stats else 0
         possessive = "Your" if target.id == ctx.author.id else f"{target.display_name}'s"
 
         text = (
@@ -428,8 +669,18 @@ class MusicCog(commands.Cog, name="MusicCog"):
             text += "\n**Highest Rated Tracks**\n" + "\n".join(lines) + "\n"
         text += footer_line("Music Profile")
 
-        items = [ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=target.display_avatar.url))]
-        await ctx.send(view=Layout(*items), ephemeral=True)
+        await ctx.send(
+            view=MusicProfileView(
+                ctx.guild.id,
+                target.id,
+                target.display_name,
+                ctx.author.id,
+                text,
+                target.display_avatar.url,
+                requested_total,
+            ),
+            ephemeral=True,
+        )
 
     @commands.hybrid_command(name="setmusicchannel", aliases=["smc"], description="Restrict music link detection to a specific channel, or 'off' to allow any channel.")
     @has_mod_permission()
@@ -440,9 +691,9 @@ class MusicCog(commands.Cog, name="MusicCog"):
             return
         target_channel = channel or ctx.channel
         await database.async_set_music_config(ctx.guild.id, channel_id=target_channel.id)
-        await ctx.send(view=SimpleLayout(f"🎵 **MUSIC CHANNEL BOUND**\nMusic link detection restricted to {target_channel.mention}."))
+        await ctx.send(view=SimpleLayout(f"🎵 **MUSIC CHANNEL BOUND**\nMusic link detection restricted to #{target_channel.name}."))
 
-    @commands.hybrid_command(name="setmusicrole", description="Select a role to ping when a new song is posted. Omit the role to clear it.")
+    @commands.hybrid_command(name="setmusicrole", aliases=["smr"], description="Select a role to ping when a new song is posted. Omit the role to clear it.")
     @has_mod_permission()
     async def setmusicrole(self, ctx: commands.Context, role: discord.Role = None):
         if role is None:
@@ -450,9 +701,9 @@ class MusicCog(commands.Cog, name="MusicCog"):
             await ctx.send(view=SimpleLayout("🔕 **MUSIC ROLE CLEARED**\nNew song posts will no longer ping a role."))
         else:
             await database.async_set_music_config(ctx.guild.id, role_id=role.id)
-            await ctx.send(view=SimpleLayout(f"🔔 **MUSIC ROLE UPDATED**\nWill now ping {role.mention} for new songs."))
+            await ctx.send(view=SimpleLayout(f"🔔 **MUSIC ROLE UPDATED**\nWill now ping {role.name} for new songs."))
 
-    @commands.hybrid_command(name="setmusiclock", description="Set channel lock duration (in seconds) after a song is posted. Omit seconds to disable the lock.")
+    @commands.hybrid_command(name="setmusiclock", aliases=["sml"], description="Set channel lock duration (in seconds) after a song is posted. Omit seconds to disable the lock.")
     @has_mod_permission()
     async def setmusiclock(self, ctx: commands.Context, seconds: int = 0):
         if seconds < 0:
@@ -462,7 +713,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
         status = f"Channel will lock for **{seconds} seconds**." if seconds > 0 else "Channel lock disabled."
         await ctx.send(view=SimpleLayout(f"⏱️ **MUSIC COOLDOWN UPDATED**\n{status}"))
 
-    @commands.command(name="song")
+    @commands.command(name="song", aliases=["s"])
     async def song_command(self, ctx: commands.Context, *, query: str):
         try:
             title, artist, cover_url, track_url, preview_url = await search_song_metadata(
@@ -515,7 +766,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
     @app_commands.command(name="musicleaderboard", description="Show the top rated songs in this server")
     @app_commands.describe(min_score="Only show songs with an average rating at or above this value (0-10)")
     async def music_leaderboard(self, interaction: discord.Interaction, min_score: app_commands.Range[float, 0.0, 10.0] = 0.0):
-        rows = await database.get_music_leaderboard(interaction.guild.id, limit=10, min_votes=2, min_score=min_score)
+        rows = await database.get_music_leaderboard(interaction.guild.id, limit=None, min_votes=2, min_score=min_score)
         if not rows:
             msg = ("No rated songs yet — post a link or use `/song` to get started!" if min_score == 0.0
                    else f"No songs found with an average rating of **{min_score}/10** or higher.")
@@ -559,7 +810,7 @@ class MusicCog(commands.Cog, name="MusicCog"):
             except Exception:
                 logger.debug("Non-fatal exception suppressed", exc_info=True)
 
-    @commands.hybrid_command(name="renumbersongs", description="Re-sequences song IDs to close gaps left by deletions, and repairs live rating buttons.")
+    @commands.hybrid_command(name="renumbersongs", aliases=["rs"], description="Re-sequences song IDs to close gaps left by deletions, and repairs live rating buttons.")
     @commands.has_permissions(administrator=True)
     async def renumbersongs(self, ctx: commands.Context):
         view = RenumberConfirmView(ctx.author.id)
