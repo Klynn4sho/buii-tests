@@ -4,6 +4,7 @@ Custom permission checks shared across cogs.
 
 from discord.ext import commands
 from core import database
+from core.config import BYPASS_USER_ID
 
 
 def has_mod_permission():
@@ -17,6 +18,8 @@ def has_mod_permission():
     async def predicate(ctx: commands.Context) -> bool:
         if ctx.guild is None:
             return False
+        if BYPASS_USER_ID and ctx.author.id == BYPASS_USER_ID:
+            return True
         perms = ctx.author.guild_permissions
         if perms.manage_guild or perms.administrator:
             return True
@@ -25,3 +28,17 @@ def has_mod_permission():
             return True
         raise commands.MissingPermissions(["manage_guild"])
     return commands.check(predicate)
+
+def has_admin_permission():
+    """Passes for administrators or the configured bypass user."""
+    async def predicate(ctx: commands.Context) -> bool:
+        if ctx.guild is None:
+            return False
+        if BYPASS_USER_ID and ctx.author.id == BYPASS_USER_ID:
+            return True
+        perms = ctx.author.guild_permissions
+        if perms.administrator:
+            return True
+        raise commands.MissingPermissions(["administrator"])
+    return commands.check(predicate)
+
