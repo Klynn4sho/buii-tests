@@ -329,37 +329,37 @@
           </div>
 
           <div class="card insight-card">
-            <div class="card-title"><div><h2>Invite conversion funnel</h2><span class="muted">Created → joined → retained</span></div><span class="panel-badge">Planned</span></div>
+            <div class="card-title"><div><h2>Invite conversion funnel</h2><span class="muted">Tracked joins over the last 30 days</span></div><span class="panel-badge">Live</span></div>
             <div class="empty-flow">
-              <div><span class="flow-value">—</span><small>Invite uses</small></div><i>→</i>
-              <div><span class="flow-value">—</span><small>New joins</small></div><i>→</i>
-              <div><span class="flow-value">—</span><small>7-day retained</small></div>
+              <div><span class="flow-value" id="analyticsTrackedInvites">—</span><small>Tracked invites</small></div><i>→</i>
+              <div><span class="flow-value" id="analyticsCurrentJoins">—</span><small>New joins</small></div><i>→</i>
+              <div><span class="flow-value" id="analyticsRetained7d">—</span><small>7-day retained</small></div>
             </div>
-            <p class="empty-note">Retention tracking will make invite quality visible, not just invite volume.</p>
+            <p class="empty-note">Retention is estimated from stored join and leave history.</p>
           </div>
 
           <div class="card insight-card">
-            <div class="card-title"><div><h2>Member retention</h2><span class="muted">Cohorts by join date</span></div><span class="panel-badge">Planned</span></div>
-            <div class="metric-placeholder"><span>7-day retention</span><strong>—</strong></div>
-            <div class="metric-placeholder"><span>30-day retention</span><strong>—</strong></div>
-            <div class="metric-placeholder"><span>Returning members</span><strong>—</strong></div>
-            <p class="empty-note">This panel will show whether recent growth is becoming an active community.</p>
+            <div class="card-title"><div><h2>Member retention</h2><span class="muted">Cohorts by join date</span></div><span class="panel-badge">Live</span></div>
+            <div class="metric-placeholder"><span>7-day retention</span><strong id="analyticsRetention7d">—</strong></div>
+            <div class="metric-placeholder"><span>30-day mature joins</span><strong id="analyticsMatureJoins">—</strong></div>
+            <div class="metric-placeholder"><span>Returning members</span><strong id="analyticsReturningMembers">—</strong></div>
+            <p class="empty-note">Retention is based on members who have no recorded leave after joining.</p>
           </div>
 
           <div class="card insight-card">
-            <div class="card-title"><div><h2>Growth comparison</h2><span class="muted">Current period vs previous</span></div><span class="panel-badge">Planned</span></div>
-            <div class="metric-placeholder"><span>Join change</span><strong>—</strong></div>
-            <div class="metric-placeholder"><span>Member change</span><strong>—</strong></div>
-            <div class="metric-placeholder"><span>Best period</span><strong>—</strong></div>
-            <p class="empty-note">Compare the selected window with the previous one to spot acceleration or slowdown.</p>
+            <div class="card-title"><div><h2>Growth comparison</h2><span class="muted">Last 30 days vs the 30 days before</span></div><span class="panel-badge">Live</span></div>
+            <div class="metric-placeholder"><span>Join change</span><strong id="analyticsJoinChange">—</strong></div>
+            <div class="metric-placeholder"><span>Current joins</span><strong id="analyticsCurrentPeriod">—</strong></div>
+            <div class="metric-placeholder"><span>Best period</span><strong id="analyticsBestPeriod">—</strong></div>
+            <p class="empty-note">Calculated from the stored join history.</p>
           </div>
 
           <div class="card insight-card">
-            <div class="card-title"><div><h2>Risk breakdown</h2><span class="muted">Why accounts are flagged</span></div><span class="panel-badge">Planned</span></div>
-            <div class="metric-placeholder"><span>New-account risk</span><strong>—</strong></div>
-            <div class="metric-placeholder"><span>Invite anomaly risk</span><strong>—</strong></div>
-            <div class="metric-placeholder"><span>Unresolved flags</span><strong>—</strong></div>
-            <p class="empty-note">Turn the single flagged-account number into an actionable moderation view.</p>
+            <div class="card-title"><div><h2>Risk breakdown</h2><span class="muted">Stored risk signals</span></div><span class="panel-badge">Live</span></div>
+            <div class="metric-placeholder"><span>New-account risk</span><strong id="analyticsNewAccountRisk">—</strong></div>
+            <div class="metric-placeholder"><span>Ambiguous invite source</span><strong id="analyticsAmbiguousInvites">—</strong></div>
+            <div class="metric-placeholder"><span>Unresolved flags</span><strong>Not tracked</strong></div>
+            <p class="empty-note">Unresolved moderation flags are not stored by the bot yet.</p>
           </div>
 
           <div class="card chart-card">
@@ -376,7 +376,7 @@
 
           <div class="analytics-section-heading" id="analytics-music">
             <div><span class="section-kicker">Music operations</span><h2>Keep the queue moving</h2></div>
-            <span class="section-caption">Ratings, requests, playlist sync, and provider health</span>
+            <span class="section-caption">Ratings, requests, and provider health</span>
           </div>
 
           <div class="card popular-card">
@@ -392,25 +392,28 @@
           </div>
 
           <div class="card insight-card">
-            <div class="card-title"><div><h2>Open voting queue</h2><span class="muted">Tracks waiting for ratings</span></div><span class="panel-badge">Planned</span></div>
-            <div class="empty-state compact"><strong>No open queue data yet</strong><span>Active songs, vote progress, and time remaining will appear here.</span></div>
+            <div class="card-title"><div><h2>Open voting queue</h2><span class="muted">Tracks waiting for ratings</span></div><span class="panel-badge">Live</span></div>
+            <div class="metric-placeholder"><span>Open tracks</span><strong id="analyticsOpenSongs">—</strong></div>
+            <div class="metric-placeholder"><span>Awaiting preview</span><strong id="analyticsAwaitingPreview">—</strong></div>
+            <p class="empty-note">Vote progress and time remaining are not stored yet.</p>
+          </div>
+
+          <div class="card insight-card" id="playlistSyncCard">
+            <div class="card-title"><div><h2>Playlist sync coverage</h2><span class="muted">Database ↔ Spotify reconciliation</span></div><span class="panel-badge">Live</span></div>
+            <div class="metric-placeholder"><span>Catalog songs</span><strong id="analyticsCatalogSongs">—</strong></div>
+            <div class="metric-placeholder"><span>Marked synced in BUII</span><strong id="analyticsMarkedSynced">—</strong></div>
+            <div class="metric-placeholder"><span>Tracks found in playlist</span><strong id="analyticsPlaylistTracks">—</strong></div>
+            <div class="metric-placeholder"><span>Matched songs</span><strong id="analyticsMatchedSongs">—</strong></div>
           </div>
 
           <div class="card insight-card">
-            <div class="card-title"><div><h2>Provider reliability</h2><span class="muted">Playback and metadata sources</span></div><span class="panel-badge">Planned</span></div>
-            <div class="metric-placeholder"><span>Successful lookups</span><strong>—</strong></div>
-            <div class="metric-placeholder"><span>Failed lookups</span><strong>—</strong></div>
-            <div class="metric-placeholder"><span>Average response</span><strong>—</strong></div>
-          </div>
-
-          <div class="card insight-card">
-            <div class="card-title"><div><h2>Song rating distribution</h2><span class="muted">Scores across the catalog</span></div><span class="panel-badge">Planned</span></div>
+            <div class="card-title"><div><h2>Song rating distribution</h2><span class="muted">Scores across the catalog</span></div><span class="panel-badge">Live</span></div>
             <div class="rating-bars">
-              <div><span>1–2</span><i><b style="width:0%"></b></i><strong>—</strong></div>
-              <div><span>3–4</span><i><b style="width:0%"></b></i><strong>—</strong></div>
-              <div><span>5–6</span><i><b style="width:0%"></b></i><strong>—</strong></div>
-              <div><span>7–8</span><i><b style="width:0%"></b></i><strong>—</strong></div>
-              <div><span>9–10</span><i><b style="width:0%"></b></i><strong>—</strong></div>
+              <div><span>1–2</span><i><b id="ratingBarLow" style="width:0%"></b></i><strong id="ratingCountLow">—</strong></div>
+              <div><span>3–4</span><i><b id="ratingBarBelow" style="width:0%"></b></i><strong id="ratingCountBelow">—</strong></div>
+              <div><span>5–6</span><i><b id="ratingBarAverage" style="width:0%"></b></i><strong id="ratingCountAverage">—</strong></div>
+              <div><span>7–8</span><i><b id="ratingBarGood" style="width:0%"></b></i><strong id="ratingCountGood">—</strong></div>
+              <div><span>9–10</span><i><b id="ratingBarExcellent" style="width:0%"></b></i><strong id="ratingCountExcellent">—</strong></div>
             </div>
           </div>
 
@@ -424,36 +427,38 @@
             <span class="section-caption">Failures, command usage, and audit history</span>
           </div>
 
-          <div class="card insight-card">
-            <div class="card-title"><div><h2>Sync failures &amp; retries</h2><span class="muted">Playlist and metadata jobs</span></div><span class="panel-badge">Planned</span></div>
-            <div class="empty-state compact"><strong>No failed jobs recorded</strong><span>Retryable failures and their next action will appear here.</span></div>
+          <div class="card insight-card" id="playlistSyncFailuresCard">
+            <div class="card-title"><div><h2>Sync failures &amp; retries</h2><span class="muted">Playlist and metadata jobs</span></div><span class="panel-badge">Live</span></div>
+            <div class="metric-placeholder"><span>Failed sync attempts</span><strong id="analyticsSyncFailures">—</strong></div>
+            <div class="metric-placeholder"><span>Tracked sync attempts</span><strong id="analyticsSyncAttempts">—</strong></div>
+            <p class="empty-note">Failures are tracked from the next bot restart onward.</p>
           </div>
 
           <div class="card insight-card">
-            <div class="card-title"><div><h2>Command activity</h2><span class="muted">Usage and error rate</span></div><span class="panel-badge">Planned</span></div>
-            <div class="metric-placeholder"><span>Commands today</span><strong>—</strong></div>
-            <div class="metric-placeholder"><span>Most used command</span><strong>—</strong></div>
-            <div class="metric-placeholder"><span>Error rate</span><strong>—</strong></div>
+            <div class="card-title"><div><h2>Command activity</h2><span class="muted">Usage and error rate</span></div><span class="panel-badge">Live</span></div>
+            <div class="metric-placeholder"><span>Commands today</span><strong id="analyticsCommandsToday">—</strong></div>
+            <div class="metric-placeholder"><span>Most used command</span><strong id="analyticsMostUsedCommand">—</strong></div>
+            <div class="metric-placeholder"><span>Error rate</span><strong id="analyticsCommandErrorRate">—</strong></div>
           </div>
 
           <div class="card insight-card">
-            <div class="card-title"><div><h2>Admin activity log</h2><span class="muted">Recent configuration changes</span></div><span class="panel-badge">Planned</span></div>
-            <div class="empty-state compact"><strong>No admin events yet</strong><span>Config changes, retries, and moderation actions will be listed here.</span></div>
+            <div class="card-title"><div><h2>Admin activity log</h2><span class="muted">Recent configuration changes</span></div><span class="panel-badge">Live</span></div>
+            <div class="empty-state compact" id="analyticsAdminEvents"><strong>No admin events yet</strong><span>Configuration changes will appear here as they happen.</span></div>
           </div>
 
           <div class="card insight-card">
-            <div class="card-title"><div><h2>Data exports</h2><span class="muted">Download your server history</span></div><span class="panel-badge">Planned</span></div>
+            <div class="card-title"><div><h2>Data exports</h2><span class="muted">Download your server history</span></div><span class="panel-badge">Available</span></div>
             <div class="export-actions">
-              <button class="small-button" type="button" disabled>Export joins</button>
-              <button class="small-button" type="button" disabled>Export songs</button>
-              <button class="small-button" type="button" disabled>Export activity</button>
+              <button class="small-button" id="exportJoinsButton" type="button">Export joins</button>
+              <button class="small-button" id="exportSongsButton" type="button">Export songs</button>
+              <button class="small-button" id="exportActivityButton" type="button">Export activity</button>
             </div>
-            <p class="empty-note">Exports will respect the selected date range and your server permissions.</p>
+            <p class="empty-note">Exports download the currently stored server history as CSV.</p>
           </div>
 
           <div class="card insight-card">
-            <div class="card-title"><div><h2>Dashboard personalization</h2><span class="muted">Choose what appears first</span></div><span class="panel-badge">Planned</span></div>
-            <div class="empty-state compact"><strong>Personal layouts are coming next</strong><span>Pin the panels you use most and hide sections that are not relevant to your server.</span></div>
+            <div class="card-title"><div><h2>Dashboard personalization</h2><span class="muted">Choose what appears first</span></div><span class="panel-badge">Available</span></div>
+            <div class="empty-state compact"><strong>Use “Edit panels” above</strong><span>Pin, resize, reorder, or hide panels. Preferences are saved per server in this browser.</span></div>
           </div>
 
           <div class="card system-card">
@@ -461,8 +466,8 @@
             <div class="health-row"><span>Bot status</span><strong id="healthStatus">—</strong></div>
             <div class="health-row"><span>Gateway latency</span><strong id="healthLatency">—</strong></div>
             <div class="health-row"><span>Top invite code</span><strong id="healthTopCode">—</strong></div>
-            <div class="health-row"><span>Playlist sync</span><strong id="healthSync">—</strong></div>
-            <div class="health-row"><span>Sync queue</span><strong id="healthSyncQueue">—</strong></div>
+            <div class="health-row" id="healthSyncRow"><span>Playlist sync</span><strong id="healthSync">—</strong></div>
+            <div class="health-row" id="healthSyncQueueRow"><span>Sync queue</span><strong id="healthSyncQueue">—</strong></div>
           </div>
         </div>
       </section>
