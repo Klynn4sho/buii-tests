@@ -18,7 +18,7 @@ def init_db_pool():
     if not DB_CONNECTION_STRING:
         raise RuntimeError("DB_URL environment variable is not set.")
     try:
-        db_pool = pool.SimpleConnectionPool(DB_POOL_MIN, DB_POOL_MAX, DB_CONNECTION_STRING)
+        db_pool = pool.ThreadedConnectionPool(DB_POOL_MIN, DB_POOL_MAX, DB_CONNECTION_STRING)
     except psycopg2.Error as exc:
         raise RuntimeError("Could not connect to PostgreSQL. Check DB_URL and database availability.") from exc
 
