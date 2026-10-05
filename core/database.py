@@ -87,6 +87,40 @@ def _raw_init_db():
         cursor.execute("ALTER TABLE joins ADD COLUMN IF NOT EXISTS invite_source TEXT DEFAULT 'invite';")
         cursor.execute("CREATE INDEX IF NOT EXISTS joins_guild_date_idx ON joins (guild_id, join_date);")
         cursor.execute("CREATE INDEX IF NOT EXISTS joins_inviter_id_idx ON joins (guild_id, inviter_id);")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dashboard_events (
+                id BIGSERIAL PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                success BOOLEAN NOT NULL DEFAULT TRUE,
+                duration_ms INTEGER,
+                details TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+  
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS playlist_sync_state (
+                guild_id BIGINT PRIMARY KEY,
+                playlist_track_count INTEGER NOT NULL DEFAULT 0,
+                matched_song_count INTEGER NOT NULL DEFAULT 0,
+                checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+  
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS vote_blacklist (
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (guild_id, user_id)
+            );
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS dashboard_events_guild_date_idx
+            ON dashboard_events (guild_id, created_at DESC);
+        """)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS leaves (
                 guild_id TEXT,
@@ -704,8 +738,8 @@ def _raw_get_growth_analytics(guild_id):
         cursor.execute('''
             SELECT
                 COUNT(*) AS total_joins,
-                COUNT(*) FILTER (WHERE join_date >= NOW() - INTERVAL '24 hours') AS joins_24h,
-                COUNT(*) FILTER (WHERE join_date >= NOW() - INTERVAL '7 days') AS joins_7d,
+                COUNT(*) FILTER (WHERE join_date::timestamptz >= NOW() - INTERVAL '24 hours') AS joins_24h,
+                COUNT(*) FILTER (WHERE join_date::timestamptz >= NOW() - INTERVAL '7 days') AS joins_7d,
                 COUNT(*) FILTER (WHERE account_age_days < 7) AS high_risk,
                 COUNT(DISTINCT inviter_id) FILTER (WHERE inviter_id IS NOT NULL) AS unique_inviters
             FROM joins WHERE guild_id = %s;
@@ -764,6 +798,169 @@ def _raw_get_joins_in_range(guild_id, start_dt=None, limit=None, newest_first=Fa
 
 async def async_get_joins_in_range(guild_id, start_dt=None, limit=None, newest_first=False):
     return await asyncio.to_thread(_raw_get_joins_in_range, guild_id, start_dt, limit, newest_first)
+
+
+def _raw_record_dashboard_event(guild_id, event_type, name, success=True, duration_ms=None, details=None):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO dashboard_events
+                (guild_id, event_type, name, success, duration_ms, details)
+            VALUES (%s, %s, %s, %s, %s, %s);
+        """, (str(guild_id), event_type, name, bool(success), duration_ms, details))
+        conn.commit()
+        cursor.close()
+    finally:
+        release_db_conn(conn)
+
+
+async def async_record_dashboard_event(guild_id, event_type, name, success=True, duration_ms=None, details=None):
+    await asyncio.to_thread(
+        _raw_record_dashboard_event,
+        guild_id, event_type, name, success, duration_ms, details,
+    )
+
+
+def _raw_get_dashboard_telemetry(guild_id):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT
+                COUNT(*) FILTER (WHERE event_type = 'command'
+                                  AND created_at >= NOW() - INTERVAL '24 hours') AS commands_today,
+                COUNT(*) FILTER (WHERE event_type = 'command' AND NOT success
+                                  AND created_at >= NOW() - INTERVAL '24 hours') AS command_errors,
+                COUNT(*) FILTER (WHERE event_type = 'command'
+                                  AND created_at >= NOW() - INTERVAL '24 hours') AS command_events
+            FROM dashboard_events
+            WHERE guild_id = %s;
+        """, (str(guild_id),))
+        command_totals = cursor.fetchone() or {}
+        cursor.execute("""
+            SELECT name, COUNT(*) AS uses
+            FROM dashboard_events
+            WHERE guild_id = %s AND event_type = 'command'
+              AND created_at >= NOW() - INTERVAL '24 hours'
+            GROUP BY name ORDER BY uses DESC, name ASC LIMIT 1;
+        """, (str(guild_id),))
+        most_used = cursor.fetchone() or {}
+        cursor.execute("""
+            SELECT event_type, name, success, details, created_at
+            FROM dashboard_events
+            WHERE guild_id = %s AND event_type = 'admin'
+            ORDER BY created_at DESC LIMIT 5;
+        """, (str(guild_id),))
+        admin_events = cursor.fetchall()
+        cursor.execute("""
+            SELECT COUNT(*) FILTER (WHERE event_type = 'sync' AND NOT success) AS sync_failures,
+                   COUNT(*) FILTER (WHERE event_type = 'sync') AS sync_attempts
+            FROM dashboard_events
+            WHERE guild_id = %s AND created_at >= NOW() - INTERVAL '30 days';
+        """, (str(guild_id),))
+        sync = cursor.fetchone() or {}
+        cursor.execute("""
+            SELECT COALESCE(source, 'unknown') AS source,
+                   COUNT(*) AS songs,
+                   COUNT(*) FILTER (WHERE COALESCE(synced, 0) = 1) AS synced
+            FROM songs
+            WHERE guild_id = %s
+            GROUP BY COALESCE(source, 'unknown')
+            ORDER BY songs DESC;
+        """, (guild_id,))
+        providers = cursor.fetchall()
+        cursor.close()
+        return {
+            "commands": command_totals,
+            "most_used": most_used,
+            "admin_events": admin_events,
+            "sync": sync,
+            "providers": providers,
+        }
+    finally:
+        release_db_conn(conn)
+
+
+
+
+def _raw_get_analytics_insights(guild_id):
+    """Return dashboard metrics that can be derived from stored join/music data."""
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT
+                COUNT(*) FILTER (WHERE join_date::timestamptz >= NOW() - INTERVAL '30 days') AS current_joins,
+                COUNT(*) FILTER (WHERE join_date::timestamptz >= NOW() - INTERVAL '60 days'
+                                  AND join_date::timestamptz < NOW() - INTERVAL '30 days') AS previous_joins,
+                COUNT(DISTINCT NULLIF(invite_code, '')) AS tracked_invites,
+                COUNT(*) FILTER (WHERE account_age_days < 7) AS new_account_risk,
+                COUNT(*) FILTER (WHERE invite_source = 'ambiguous') AS ambiguous_invites,
+                COUNT(DISTINCT user_id) FILTER (WHERE join_date::timestamptz < NOW() - INTERVAL '7 days') AS mature_joins
+            FROM joins
+            WHERE guild_id = %s;
+        """, (str(guild_id),))
+        growth = cursor.fetchone() or {}
+
+        cursor.execute("""
+            SELECT COUNT(*) AS retained_joins
+            FROM joins j
+            WHERE j.guild_id = %s
+              AND j.join_date::timestamptz >= NOW() - INTERVAL '37 days'
+              AND j.join_date::timestamptz < NOW() - INTERVAL '7 days'
+              AND NOT EXISTS (
+                  SELECT 1 FROM leaves l
+                  WHERE l.guild_id = j.guild_id
+                    AND l.user_id = j.user_id
+                    AND l.leave_date::timestamptz > j.join_date::timestamptz
+              );
+        """, (str(guild_id),))
+        retention = cursor.fetchone() or {}
+
+        cursor.execute("""
+            SELECT COUNT(*) AS returning_members
+            FROM (
+                SELECT user_id
+                FROM joins
+                WHERE guild_id = %s
+                GROUP BY user_id
+                HAVING COUNT(*) > 1
+            ) repeated;
+        """, (str(guild_id),))
+        returning = cursor.fetchone() or {}
+
+        cursor.execute("""
+            SELECT COUNT(*) FILTER (WHERE COALESCE(closed, 0) = 0) AS open_songs,
+                   COUNT(*) FILTER (WHERE COALESCE(closed, 0) = 0 AND COALESCE(preview_used, 0) = 0) AS awaiting_preview
+            FROM songs
+            WHERE guild_id = %s;
+        """, (guild_id,))
+        queue = cursor.fetchone() or {}
+
+        cursor.execute("""
+            SELECT
+                COUNT(*) FILTER (WHERE r.score BETWEEN 1 AND 2) AS low,
+                COUNT(*) FILTER (WHERE r.score BETWEEN 3 AND 4) AS below_average,
+                COUNT(*) FILTER (WHERE r.score BETWEEN 5 AND 6) AS average,
+                COUNT(*) FILTER (WHERE r.score BETWEEN 7 AND 8) AS good,
+                COUNT(*) FILTER (WHERE r.score BETWEEN 9 AND 10) AS excellent,
+                COUNT(*) AS total
+            FROM ratings r
+            JOIN songs s ON s.id = r.song_id
+            WHERE s.guild_id = %s;
+        """, (guild_id,))
+        ratings = cursor.fetchone() or {}
+        cursor.close()
+        return {
+            "growth": growth,
+            "retention": retention,
+            "returning": returning,
+            "queue": queue,
+            "ratings": ratings,
+        }
+    finally:
+        release_db_conn(conn)
 
 
 def _raw_get_daily_join_counts(guild_id, days=30):
@@ -932,6 +1129,41 @@ def _raw_get_invitees(guild_id, inviter_name=None, invite_code=None, limit=25):
 
 async def async_get_invitees(guild_id, inviter_name=None, invite_code=None, limit=25):
     return await asyncio.to_thread(_raw_get_invitees, guild_id, inviter_name, invite_code, limit)
+
+
+def _raw_get_invite_code_detail(guild_id, invite_code, limit=25):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute('''
+            SELECT inviter_name, inviter_id, invite_source,
+                   COUNT(*) AS join_count,
+                   COUNT(*) FILTER (WHERE account_age_days < 7) AS flagged_count,
+                   MAX(invite_uses) AS latest_uses
+            FROM joins
+            WHERE guild_id = %s AND invite_code = %s
+            GROUP BY inviter_name, inviter_id, invite_source
+            ORDER BY join_count DESC, inviter_name ASC;
+        ''', (str(guild_id), invite_code))
+        summaries = cursor.fetchall()
+        cursor.execute('''
+            SELECT user_id, user_name, join_date, account_age_days, inviter_name,
+                   inviter_id, invite_source, invite_uses
+            FROM joins
+            WHERE guild_id = %s AND invite_code = %s
+            ORDER BY join_date DESC
+            LIMIT %s;
+        ''', (str(guild_id), invite_code, max(1, min(int(limit), 100))))
+        invitees = cursor.fetchall()
+        cursor.close()
+        return summaries, invitees
+    finally:
+        release_db_conn(conn)
+
+
+async def async_get_invite_code_detail(guild_id, invite_code, limit=25):
+    return await asyncio.to_thread(_raw_get_invite_code_detail, guild_id, invite_code, limit)
+
 
 
 # ==========================================================================
@@ -1236,13 +1468,19 @@ def _raw_get_music_leaderboard(guild_id, limit, min_votes, min_score=0.0):
     conn = get_db_conn()
     try:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute('''
+        query = '''
             SELECT s.id, s.song_number, s.title, s.artist, s.created_at, AVG(r.score) AS avg_score, COUNT(r.score) AS votes
             FROM songs s JOIN ratings r ON s.id = r.song_id
             WHERE s.guild_id = %s GROUP BY s.id
             HAVING COUNT(r.score) >= %s AND AVG(r.score) >= %s
-            ORDER BY avg_score DESC, votes DESC LIMIT %s;
-        ''', (guild_id, min_votes, min_score, limit))
+            ORDER BY avg_score DESC, votes DESC
+        '''
+        params = [guild_id, min_votes, min_score]
+        if limit is not None:
+            query += " LIMIT %s"
+            params.append(max(1, min(int(limit), 10000)))
+        query += ";"
+        cursor.execute(query, tuple(params))
         rows = cursor.fetchall()
         cursor.close()
         return rows
@@ -1275,6 +1513,215 @@ def _raw_get_music_log(guild_id, limit=25):
 
 async def get_music_log(guild_id: int, limit: int = 25):
     return await asyncio.to_thread(_raw_get_music_log, guild_id, limit)
+
+
+
+
+def _raw_set_vote_blacklist(guild_id, user_id, blocked=True):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor()
+        if blocked:
+            cursor.execute("""
+                INSERT INTO vote_blacklist (guild_id, user_id)
+                VALUES (%s, %s) ON CONFLICT DO NOTHING;
+            """, (str(guild_id), str(user_id)))
+        else:
+            cursor.execute("""
+                DELETE FROM vote_blacklist
+                WHERE guild_id = %s AND user_id = %s;
+            """, (str(guild_id), str(user_id)))
+        conn.commit()
+        cursor.close()
+    finally:
+        release_db_conn(conn)
+
+
+def _raw_is_vote_blacklisted(guild_id, user_id):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 1 FROM vote_blacklist
+            WHERE guild_id = %s AND user_id = %s;
+        """, (str(guild_id), str(user_id)))
+        blocked = cursor.fetchone() is not None
+        cursor.close()
+        return blocked
+    finally:
+        release_db_conn(conn)
+
+
+def _raw_get_vote_blacklist(guild_id):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT user_id, created_at
+            FROM vote_blacklist
+            WHERE guild_id = %s
+            ORDER BY created_at ASC;
+        """, (str(guild_id),))
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    finally:
+        release_db_conn(conn)
+
+
+async def is_vote_blacklisted(guild_id, user_id):
+    return await asyncio.to_thread(_raw_is_vote_blacklisted, guild_id, user_id)
+
+
+async def set_vote_blacklist(guild_id, user_id, blocked=True):
+    await asyncio.to_thread(_raw_set_vote_blacklist, guild_id, user_id, blocked)
+
+
+async def get_vote_blacklist(guild_id):
+    return await asyncio.to_thread(_raw_get_vote_blacklist, guild_id)
+
+
+
+def _raw_set_playlist_sync_state(guild_id, playlist_track_count, matched_song_count):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO playlist_sync_state
+                (guild_id, playlist_track_count, matched_song_count, checked_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (guild_id) DO UPDATE SET
+                playlist_track_count = EXCLUDED.playlist_track_count,
+                matched_song_count = EXCLUDED.matched_song_count,
+                checked_at = EXCLUDED.checked_at;
+        """, (guild_id, playlist_track_count, matched_song_count))
+        conn.commit()
+        cursor.close()
+    finally:
+        release_db_conn(conn)
+
+
+def _raw_get_music_sync_summary(guild_id):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT COUNT(*) AS catalog_songs,
+                   COUNT(*) FILTER (WHERE COALESCE(synced, 0) = 1) AS marked_synced
+            FROM songs WHERE guild_id = %s;
+        """, (guild_id,))
+        songs = cursor.fetchone() or {}
+        cursor.execute("""
+            SELECT playlist_track_count, matched_song_count, checked_at
+            FROM playlist_sync_state WHERE guild_id = %s;
+        """, (guild_id,))
+        state = cursor.fetchone() or {}
+        cursor.close()
+        return {
+            "catalog_songs": int(songs.get("catalog_songs") or 0),
+            "marked_synced": int(songs.get("marked_synced") or 0),
+            "playlist_track_count": int(state.get("playlist_track_count") or 0),
+            "matched_song_count": int(state.get("matched_song_count") or 0),
+            "checked_at": state.get("checked_at"),
+        }
+    finally:
+        release_db_conn(conn)
+
+
+def _raw_get_member_ratings(guild_id, user_id, limit=None, offset=0):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        query = """
+            SELECT s.song_number, s.title, s.artist, r.score
+            FROM ratings r
+            JOIN songs s ON s.id = r.song_id
+            WHERE s.guild_id = %s AND r.user_id = %s
+            ORDER BY s.song_number ASC
+        """
+        params = [guild_id, user_id]
+        if limit is not None:
+            query += " LIMIT %s OFFSET %s"
+            params.extend([max(1, min(int(limit), 10000)), max(0, int(offset))])
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    finally:
+        release_db_conn(conn)
+
+
+def _raw_count_member_ratings(guild_id, user_id):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) FROM ratings r
+            JOIN songs s ON s.id = r.song_id
+            WHERE s.guild_id = %s AND r.user_id = %s;
+        """, (guild_id, user_id))
+        count = cursor.fetchone()[0]
+        cursor.close()
+        return count
+    finally:
+        release_db_conn(conn)
+
+
+async def get_member_ratings(guild_id, user_id, limit=None, offset=0):
+    return await asyncio.to_thread(_raw_get_member_ratings, guild_id, user_id, limit, offset)
+
+
+async def count_member_ratings(guild_id, user_id):
+    return await asyncio.to_thread(_raw_count_member_ratings, guild_id, user_id)
+
+
+def _raw_get_member_requested_songs(guild_id, user_id, limit=None, offset=0):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        query = """
+            SELECT song_number, title, artist, created_at, closed, synced
+            FROM songs
+            WHERE guild_id = %s AND requested_by_id = %s
+            ORDER BY song_number ASC
+        """
+        params = [guild_id, user_id]
+        if limit is not None:
+            query += " LIMIT %s OFFSET %s"
+            params.extend([max(1, min(int(limit), 10000)), max(0, int(offset))])
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    finally:
+        release_db_conn(conn)
+
+
+def _raw_count_member_requested_songs(guild_id, user_id):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM songs
+            WHERE guild_id = %s AND requested_by_id = %s;
+        """, (guild_id, user_id))
+        count = cursor.fetchone()[0]
+        cursor.close()
+        return count
+    finally:
+        release_db_conn(conn)
+
+
+async def get_member_requested_songs(guild_id, user_id, limit=None, offset=0):
+    return await asyncio.to_thread(
+        _raw_get_member_requested_songs, guild_id, user_id, limit, offset
+    )
+
+
+async def count_member_requested_songs(guild_id, user_id):
+    return await asyncio.to_thread(_raw_count_member_requested_songs, guild_id, user_id)
+
 
 
 def _raw_get_music_insights(guild_id, limit=5):
@@ -1337,6 +1784,30 @@ def _raw_search_songs(guild_id, query, limit, min_votes, min_score):
 async def search_songs(guild_id: int, query: str, limit: int = 25,
                        min_votes: int = 2, min_score: float = 0.0):
     return await asyncio.to_thread(_raw_search_songs, guild_id, query, limit, min_votes, min_score)
+
+
+
+def _raw_get_unsynced_spotify_songs(guild_id):
+    conn = get_db_conn()
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT id, url, title, artist, synced
+            FROM songs
+            WHERE guild_id = %s
+              AND url LIKE %s
+            ORDER BY id;
+        """, (guild_id, "%spotify.com/track/%"))
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    finally:
+        release_db_conn(conn)
+
+
+async def get_unsynced_spotify_songs(guild_id):
+    return await asyncio.to_thread(_raw_get_unsynced_spotify_songs, guild_id)
+
 
 
 def _raw_mark_song_synced(guild_id, song_id):
