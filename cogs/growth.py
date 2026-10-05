@@ -26,6 +26,7 @@ from discord import ui
 from discord.ext import commands, tasks
 
 from core import database
+from core.config import DB_POOL_MAX
 from core.checks import has_mod_permission
 from core.components import SimpleLayout, Layout, footer_line, notice
 from core.config import COLOR_BRAND, COLOR_DANGER, COLOR_WARNING, COLOR_SUCCESS
@@ -75,7 +76,8 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             self.member_snapshot_task.cancel()
 
     async def snapshot_member(self, member: discord.Member, is_member: bool = True):
-        roles = [role.name for role in member.roles if not role.is_default()]
+        # Store IDs so offline member cards can still render clickable role mentions.
+        roles = [str(role.id) for role in member.roles if not role.is_default()]
         badges = []
         try:
             for item in member.public_flags.all():
@@ -111,14 +113,14 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                         members = [member async for member in guild.fetch_members(limit=None)]
                     except (discord.Forbidden, discord.HTTPException):
                         members = guild.members
-                    semaphore = asyncio.Semaphore(20)
+                    semaphore = asyncio.Semaphore(max(1, min(4, DB_POOL_MAX)))
 
                     async def save_one(member):
                         async with semaphore:
                             try:
                                 await self.snapshot_member(member)
-                            except (discord.HTTPException, asyncio.TimeoutError) as error:
-                                logger.exception("[growth] operation failed")
+                            except Exception:
+                                logger.exception("[growth] member snapshot failed")
 
                     await asyncio.gather(*(save_one(member) for member in members))
             except asyncio.CancelledError:
@@ -220,15 +222,23 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                 current_invites = await guild.invites()
                 old_invites = self.invites_cache.get(guild.id, {})
 
-                for inv in current_invites:
-                    if inv.code in old_invites and inv.uses > old_invites[inv.code]:
-                        if inv.inviter is not None:
-                            i_mention = inv.inviter.mention
-                            inviter = inv.inviter.name
-                            inviter_id = inv.inviter.id
-                        used_code = inv.code
-                        used_uses = inv.uses
-                        break
+                changed_invites = [
+                    inv for inv in current_invites
+                    if inv.code in old_invites and inv.uses > old_invites[inv.code]
+                ]
+                if len(changed_invites) == 1:
+                    inv = changed_invites[0]
+                    if inv.inviter is not None:
+                        inviter = inv.inviter.name
+                        inviter_id = inv.inviter.id
+                    used_code = inv.code
+                    used_uses = inv.uses
+                elif len(changed_invites) > 1:
+                    # More than one invite changed before the snapshot. Do not
+                    # guess an inviter; record the event as ambiguous instead.
+                    inviter = "Ambiguous / Multiple Invite Changes"
+                    used_code = "Ambiguous"
+                    invite_source = "ambiguous"
 
                 self.invites_cache[guild.id] = {inv.code: inv.uses for inv in current_invites}
             except (discord.Forbidden, AttributeError, discord.HTTPException):
@@ -246,7 +256,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
                         invite_source = "unknown"
                 except (discord.Forbidden, discord.HTTPException, AttributeError):
                     invite_source = "unknown"
-            else:
+            elif used_code != "Ambiguous":
                 invite_source = "invite"
 
         await database.async_save_join(
@@ -291,7 +301,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
     # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
-    @commands.hybrid_command(name="testjoin", description="Simulate a member join event to test and preview the join alert layout.")
+    @commands.hybrid_command(name="testjoin", aliases=["tj"], description="Simulate a member join event to test and preview the join alert layout.")
     @has_mod_permission()
     async def testjoin(self, ctx: commands.Context, account_age_days: int = 2):
         if ctx.interaction:
@@ -300,13 +310,13 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         alert_status = _risk_status(account_age_days)
         maturity_bar = account_maturity_bar(account_age_days)
 
-        alert_role_mention = ""
+        alert_role_label = ""
         if account_age_days < 7:
             alert_role_id = await database.async_get_alert_role(ctx.guild.id)
             if alert_role_id:
                 alert_role = ctx.guild.get_role(alert_role_id)
                 if alert_role:
-                    alert_role_mention = alert_role.mention + "\n"
+                    alert_role_label = f"Role: {alert_role.name}"
 
         card_buf = await create_join_card(
             self.bot.http_session, ctx.author.display_avatar.url,
@@ -314,7 +324,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             ctx.author.name, ctx.author.id, "TESTCODE", account_age_days, alert_status,
             ctx.guild.member_count, _risk_color(account_age_days).to_rgb(),
         )
-        ping_text = " ".join(part for part in (alert_role_mention.strip(), ctx.author.mention) if part)
+        ping_text = " · ".join(part for part in (alert_role_label, f"User: {ctx.author.display_name}") if part)
         view = JoinAlertView(
             discord.File(fp=card_buf, filename=f"test-join-{ctx.author.id}.png"),
             ping_text, ctx.author.id, ctx.author.id, "TESTCODE",
@@ -322,10 +332,10 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         )
         await ctx.send(
             view=view, file=view.file,
-            allowed_mentions=discord.AllowedMentions(users=True, roles=True),
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @commands.hybrid_command(name="analytics", aliases=["growthreport"], description="Show reliable growth, retention, risk, and inviter analytics.")
+    @commands.hybrid_command(name="analytics", aliases=["an", "growthreport"], description="Show reliable growth, retention, risk, and inviter analytics.")
     async def analytics(self, ctx: commands.Context):
         totals, left_count, top_inviters = await database.async_get_growth_analytics(ctx.guild.id)
         total = int(totals["total_joins"] or 0)
@@ -351,7 +361,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         lines.append(footer_line("Growth Analytics"))
         await ctx.send(view=SimpleLayout("\n".join(lines)))
 
-    @commands.hybrid_command(name="leaderboard", aliases=["lb"], description="Displays top inviters based on recorded join history.")
+    @commands.hybrid_command(name="leaderboard", aliases=["lb", "top"], description="Displays top inviters based on recorded join history.")
     async def leaderboard(self, ctx: commands.Context):
         results = await database.async_get_leaderboard(ctx.guild.id, limit=10)
 
@@ -370,8 +380,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         await ctx.send(view=SimpleLayout("\n".join(lines)))
 
     @commands.hybrid_command(
-        name='userinfo',
-        aliases=['user'],
+        name='userinfo', aliases=['ui', 'whois', 'user'],
         description='View saved profile and membership information for a user.',
     )
     @discord.app_commands.describe(user='The member or user to inspect')
@@ -409,7 +418,11 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         if live_member:
             role_text = ', '.join(role.mention for role in live_member.roles if not role.is_default()) or 'None recorded'
         else:
-            role_text = ', '.join(saved_roles) if saved_roles else 'None recorded'
+            saved_mentions = [
+                f'<@&{role}>' if str(role).isdigit() else str(role)
+                for role in saved_roles
+            ]
+            role_text = ', '.join(saved_mentions) if saved_mentions else 'None recorded'
         if len(role_text) > 850:
             role_text = role_text[:847] + '...'
         status = '✅ In this server' if live_member else '⚪ Not currently in this server'
@@ -458,7 +471,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             allowed_mentions=discord.AllowedMentions(users=False, roles=False),
             ephemeral=bool(ctx.interaction),
         )
-    @commands.hybrid_command(name="invites", description="View a member's invite history and stats.")
+    @commands.hybrid_command(name="invites", aliases=["iv"], description="View a member's invite history and stats.")
     async def invites(self, ctx: commands.Context, member: discord.Member = None):
         member = member or ctx.author
         totals, left_count, recent = await database.async_get_inviter_stats(ctx.guild.id, member.name)
@@ -489,7 +502,50 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         )
         await ctx.send(view=view, file=view.file)
 
-    @commands.hybrid_command(name="memberhistory", aliases=["joinhistory"], description="Show saved joins and leaves for a member.")
+    @commands.hybrid_command(
+        name="inviteinfo", aliases=["ii", "invitecode", "codeinfo"],
+        description="Inspect recorded uses, attribution, and invitees for an invite code.",
+    )
+    @discord.app_commands.describe(code="The Discord invite code to inspect")
+    async def inviteinfo(self, ctx: commands.Context, code: str):
+        code = code.strip().removeprefix("https://discord.gg/").removeprefix("http://discord.gg/").strip("/")
+        summaries, invitees = await database.async_get_invite_code_detail(ctx.guild.id, code)
+        if not summaries:
+            await ctx.send(view=notice(f"❌ No recorded joins were found for invite code \x60{code}\x60."))
+            return
+
+        total = sum(int(row["join_count"] or 0) for row in summaries)
+        lines = [
+            f"## INVITE CODE · {code}",
+            f"**Recorded joins** · {total}",
+            "",
+            "**Attribution records**",
+        ]
+        for row in summaries:
+            inviter_name = row.get("inviter_name") or "Unknown"
+            inviter_id = f" · ID \x60{row['inviter_id']}\x60" if row.get("inviter_id") else ""
+            source = row.get("invite_source") or "unknown"
+            uses = f" · latest uses {row['latest_uses']}" if row.get("latest_uses") is not None else ""
+            lines.append(
+                f"• **{inviter_name}**{inviter_id} · {row['join_count']} join(s) · "
+                f"{row['flagged_count']} new account(s) · source \x60{source}\x60{uses}"
+            )
+
+        lines.extend(["", "**Recent invitees**"])
+        for row in invitees[:10]:
+            flag = " · new account" if int(row["account_age_days"] or 0) < 7 else ""
+            lines.append(
+                f"• **{row['user_name']}** · {row['join_date']} · "
+                f"{row['account_age_days']}d old{flag}"
+            )
+        lines.extend([
+            "",
+            "-# Attribution is inferred from invite-use changes. Concurrent joins or missing invite permissions can make it unknown or ambiguous.",
+            footer_line("Invite Code Diagnostics"),
+        ])
+        await ctx.send(view=SimpleLayout("\n".join(lines)))
+
+    @commands.hybrid_command(name="memberhistory", aliases=["mh", "joinhistory"], description="Show saved joins and leaves for a member.")
     @discord.app_commands.describe(user="The member or user whose history you want to inspect")
     async def memberhistory(self, ctx: commands.Context, user: discord.User = None):
         target = user or ctx.author
@@ -515,7 +571,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         lines.append(footer_line("Persistent Member Records"))
         await ctx.send(view=SimpleLayout("\n".join(lines)))
 
-    @commands.hybrid_command(name="statspanel", aliases=["sp"], description="Deploys an auto-refreshing live server growth dashboard.")
+    @commands.hybrid_command(name="statspanel", aliases=["stats", "sp"], description="Deploys an auto-refreshing live server growth dashboard.")
     @has_mod_permission()
     async def statspanel(self, ctx: commands.Context):
         if ctx.interaction:
@@ -535,7 +591,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
         panel_message = await ctx.send(view=view, file=view.file)
         await database.async_save_panel_config(ctx.guild.id, ctx.channel.id, panel_message.id)
 
-    @commands.hybrid_command(name="graph", aliases=["g"], description="Displays daily growth trend charts.")
+    @commands.hybrid_command(name="graph", aliases=["gg", "g"], description="Displays daily growth trend charts.")
     @has_mod_permission()
     async def graph(self, ctx: commands.Context, days: int = 30):
         if ctx.interaction:
@@ -547,7 +603,7 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
     @has_mod_permission()
     async def setlog(self, ctx: commands.Context):
         await database.async_set_guild_log_channel(ctx.guild.id, ctx.channel.id)
-        await ctx.send(view=SimpleLayout(f"🎯 **LOG CHANNEL LOCKED**\nJoin notification alerts successfully locked to {ctx.channel.mention}."))
+        await ctx.send(view=SimpleLayout(f"🎯 **LOG CHANNEL LOCKED**\nJoin notification alerts successfully locked to #{ctx.channel.name}."))
 
     @commands.hybrid_command(name="setalertrole", aliases=["sar"], description="Set the role pinged when a high-risk (new account) join is detected.")
     @has_mod_permission()
@@ -557,10 +613,10 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             text = "🔕 **ALERT ROLE CLEARED**\nExtreme-risk join alerts will no longer ping a role."
         else:
             await database.async_set_alert_role(ctx.guild.id, role.id)
-            text = f"🚨 **ALERT ROLE SET**\nWill now ping {role.mention} when an extreme-risk (new account, <7d old) join is detected."
+            text = f"🚨 **ALERT ROLE SET**\nWill now ping {role.name} when an extreme-risk (new account, <7d old) join is detected."
         await ctx.send(view=SimpleLayout(text))
 
-    @commands.hybrid_command(name="setmodrole", description="Set a role that can manage bot config commands without full Manage Server permission.")
+    @commands.hybrid_command(name="setmodrole", aliases=["smrole"], description="Set a role that can manage bot config commands without full Manage Server permission.")
     @commands.has_permissions(administrator=True)
     async def setmodrole(self, ctx: commands.Context, role: discord.Role = None):
         # Deliberately administrator-gated, not @has_mod_permission() — a
@@ -570,10 +626,10 @@ class GrowthCog(commands.Cog, name="GrowthCog"):
             text = "🔕 **MOD ROLE CLEARED**\nOnly members with Manage Server can use bot config commands now."
         else:
             await database.async_set_mod_role(ctx.guild.id, role.id)
-            text = f"🛠️ **MOD ROLE SET**\n{role.mention} can now use bot config commands (setlog, setprefix, music settings, etc.) without needing Manage Server."
+            text = f"🛠️ **MOD ROLE SET**\n{role.name} can now use bot config commands (setlog, setprefix, music settings, etc.) without needing Manage Server."
         await ctx.send(view=SimpleLayout(text))
 
-    @commands.hybrid_command(name="setprefix", aliases=["pfx"], description="Modify server command prefix.")
+    @commands.hybrid_command(name="setprefix", aliases=["prefix", "pfx"], description="Modify server command prefix.")
     @has_mod_permission()
     async def setprefix(self, ctx: commands.Context, new_prefix: str):
         if len(new_prefix) > 5:
