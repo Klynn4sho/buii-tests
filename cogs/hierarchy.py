@@ -19,7 +19,7 @@ class HierarchyCog(commands.Cog, name="HierarchyCog"):
         self.bot = bot
 
     @commands.hybrid_command(
-        name="hierarchy", aliases=["staffs", "stafflist"],
+        name="hierarchy", aliases=["hr", "staffs", "stafflist"],
         description="Render a staff directory image showing every moderation role and its members."
     )
     @commands.cooldown(rate=1, per=15.0, type=commands.BucketType.guild)
