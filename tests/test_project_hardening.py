@@ -58,6 +58,47 @@ class ProjectHardeningTests(unittest.TestCase):
         self.assertIn("await guild.fetch_member(user_id)", bridge)
         self.assertIn("isinstance(channel, discord.TextChannel)", bridge)
 
+    def test_growth_analytics_casts_text_timestamps(self):
+        db = (ROOT / "core" / "database.py").read_text()
+        self.assertIn("join_date::timestamptz >= NOW() - INTERVAL '24 hours'", db)
+        self.assertIn("join_date::timestamptz >= NOW() - INTERVAL '7 days'", db)
+
+    def test_music_leaderboard_is_paginated(self):
+        db = (ROOT / "core" / "database.py").read_text()
+        views = (ROOT / "views" / "music_views.py").read_text()
+        music = (ROOT / "cogs" / "music.py").read_text()
+        self.assertIn("if limit is not None:", db)
+        self.assertIn("PAGE_SIZE = 10", views)
+        self.assertIn("on_next_page", views)
+        self.assertIn("limit=None", music)
+
+    def test_command_suggestion_buttons_acknowledge_and_report_failures(self):
+        main = (ROOT / "main.py").read_text()
+        self.assertIn("interaction.response.defer(thinking=True)", main)
+        self.assertIn("asyncio.wait_for(ctx.invoke(target), timeout=25)", main)
+        self.assertIn("interaction.followup.send", main)
+
+    def test_preview_ack_and_invite_diagnostics_are_wired(self):
+        views = (ROOT / "views" / "music_views.py").read_text()
+        growth = (ROOT / "cogs" / "growth.py").read_text()
+        db = (ROOT / "core" / "database.py").read_text()
+        manifest = (ROOT / "web" / "commands_manifest.py").read_text()
+        self.assertIn("Sending audio preview", views)
+        self.assertIn("async_get_invite_code_detail", growth)
+        self.assertIn("changed_invites", growth)
+        self.assertIn("ambiguous", growth)
+        self.assertIn("def _raw_get_invite_code_detail", db)
+        self.assertIn('"name": "inviteinfo"', manifest)
+
+    def test_unnecessary_mentions_are_suppressed(self):
+        music = (ROOT / "cogs" / "music.py").read_text()
+        growth = (ROOT / "cogs" / "growth.py").read_text()
+        self.assertIn("display_name = member.display_name", music)
+        self.assertIn("AllowedMentions.none()", music)
+        self.assertIn("Posted by **{requester.display_name}**", music)
+        self.assertIn('f"Role: {alert_role.name}"', growth)
+        self.assertIn("AllowedMentions.none()", growth)
+
     def test_recent_joins_are_limited_in_sql(self):
         db = (ROOT / "core" / "database.py").read_text()
         self.assertIn("def _raw_get_joins_in_range(guild_id, start_dt=None, limit=None, newest_first=False)", db)
