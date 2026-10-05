@@ -32,19 +32,20 @@ DB_POOL_MAX = max(DB_POOL_MIN, int(os.environ.get("DB_POOL_MAX", "8")))
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 APP_ENV = os.environ.get("APP_ENV", "development").strip().lower()
-_bypass_raw = os.environ.get("BYPASS_USER_ID") if APP_ENV != "production" else None
+_bypass_raw = os.environ.get("BYPASS_USER_ID")
 try:
     BYPASS_USER_ID = int(_bypass_raw) if _bypass_raw else None
 except ValueError as exc:
     raise RuntimeError("BYPASS_USER_ID must be a numeric Discord user ID.") from exc
 
 DEFAULT_PREFIX = os.environ.get("COMMAND_PREFIX", "b,")
+MUSIC_GUILD_ID = 1508845079639625789
 
 SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET")
 SPOTIFY_USER_TOKEN = os.environ.get("SPOTIFY_USER_TOKEN")
 SPOTIFY_REFRESH_TOKEN = os.environ.get("SPOTIFY_REFRESH_TOKEN")
-SPOTIFY_PLAYLIST_ID = os.environ.get("SPOTIFY_PLAYLIST_ID")
+SPOTIFY_PLAYLIST_ID = "3sMQCk4G17NiUnVYj11Rbj"
 
 # --- Discord embed palette ---
 COLOR_BRAND = discord.Color(0x5865F2)
